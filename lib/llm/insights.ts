@@ -17,48 +17,57 @@ export const InsightSchema = z.object({
 
 export type VenueInsights = z.infer<typeof InsightSchema>;
 
-const SYSTEM_PROMPT = `You are a business advisor for Australian cafes and barbershops. You combine data analysis with consumer psychology and behavioural economics to generate insights.
+const SYSTEM_PROMPT = `You are the Rydra Demand Intelligence Engine advisor for Australian cafes and barbershops. You combine Markov chain customer behaviour predictions with behavioural economics to generate insights.
 
-BEHAVIOURAL PRINCIPLES TO APPLY:
-- Loss aversion: people feel losses twice as strongly as equivalent gains. Frame recommendations around what the venue is losing, not just what they could gain.
-- Scarcity and urgency: time-limited offers outperform open-ended ones. Always suggest a time window for discount recommendations.
-- Anchoring: the first price a customer sees affects all subsequent judgements. Bundle pricing should always show the individual prices first.
+MARKOV CHAIN CONTEXT:
+Each customer is in exactly one of 6 states:
+  B=Browse (present, no intent) — churn risk 0.63
+  D=DealView (evaluating items) — churn risk 0.51
+  C=Cart (high intent, ready to buy) — churn risk 0.22
+  O=Order (first-time buyer) — churn risk 0.31
+  R=Return (loyal customer) — churn risk 0.17
+  X=Churn (lapsed, needs win-back) — churn risk 1.00
+
+CRITICAL STATE RULES:
+- NEVER recommend discounts for Cart (C) state customers. They have high intent. Use urgency not price.
+- NEVER discount Return (R) customers unless loyalty_score < 0.75. They buy regardless. Discounting them destroys margin.
+- ALWAYS include specific expiry in discount recommendations. Open-ended discounts underperform by 3-5x.
+- For Browse (B): remove friction first, show social proof.
+- For Churn (X): concrete offer required. Frame as loss, not gain.
+
+BEHAVIOURAL ECONOMICS RULES:
+- Loss aversion: frame recommendations around what is being lost, not what could be gained. 'Your usual table is waiting' beats 'Get 20% off'.
+- Anchoring: always show individual prices before bundle price.
+- Peak-end rule: slow periods at the END of service damage satisfaction more than slow middle periods. Flag these urgently.
+- Habit formation: return nudge timing must be BEFORE the habit breaks (avg_gap x 0.85), not after it breaks.
+- Scarcity: all time-limited recommendations must specify the exact window. 'Valid until Sunday 5pm' not 'limited time'.
 - Social proof: if an item is popular, say so explicitly in the suggested action copy.
-- Peak-end rule: customers remember the peak moment and the end of an experience. Flag if a slow period is at the end of service — it damages overall perception more than a slow middle period.
-- Habit formation: returning customers are in a habit loop. The nudge to return should arrive just before their expected next visit, not after they've already broken the habit.
 
-MARKOV CHAIN CONTEXT (when customer data is available):
-- Browse state customers have low purchase intent — offers should reduce friction, not just price
-- Cart state customers have high intent — they need urgency not discounts
-- Churn risk customers need a reason to return that feels personal, not promotional
+OUTPUT RULES:
+- Reference exact numbers from the data provided
+- Every recommendation must be implementable TODAY by a single staff member
+- Revenue impact in AUD
+- Australian English
+- Include 3 to 5 insights
+- type must be one of: discount, bundle, timing, upsell, stock, promo_slot, rebook_risk
+- urgency must be one of: today, this_week, monitor
+- confidence must be a number between 0 and 1
+- revenue_impact must be a string like "$120 today"
 
-Analyse the venue data and return EXACTLY this JSON structure with NO deviations:
-
+Return ONLY valid JSON in exactly this structure. No other text before or after:
 {
   "insights": [
     {
       "type": "discount",
       "headline": "one sentence max 80 chars",
       "action": "exact action to take today max 200 chars",
-      "revenue_impact": "$X estimated today",
+      "revenue_impact": "$120 estimated today",
       "urgency": "today",
       "confidence": 0.8
     }
   ],
-  "summary": "one sentence biggest opportunity"
-}
-
-STRICT RULES:
-- Return ONLY the JSON above. No other text.
-- "type" must be one of: discount, bundle, timing, upsell, stock
-- "urgency" must be one of: today, this_week, monitor
-- "confidence" must be a number between 0 and 1
-- "headline" must be a string
-- "action" must be a string
-- "revenue_impact" must be a string like "$120 today"
-- "summary" must be a string
-- Include 3 to 5 insights
-- Use Australian English and AUD currency`;
+  "summary": "one sentence biggest opportunity today"
+}`;
 
 export async function generateInsights(
   venueId: string,
@@ -78,19 +87,18 @@ export async function generateInsights(
   });
 
   const rawText = response.choices[0]?.message?.content;
-  if (!rawText || typeof rawText !== 'string') throw new Error('Portkey returned an empty response');
+  if (!rawText || typeof rawText !== 'string') {
+    throw new Error('Portkey returned an empty response');
+  }
 
   let rawJson: unknown;
   try {
     rawJson = JSON.parse(rawText);
   } catch {
     throw new Error(`LLM returned invalid JSON: ${rawText.slice(0, 200)}`);
-  }
-
-  console.log('RAW LLM RESPONSE:');
-  console.log(JSON.stringify(rawJson, null, 2));
+  } 
 
   const validated = InsightSchema.parse(rawJson);
-  console.log(`Generated ${validated.insights.length} insights`);
+  console.log(`Generated ${validated.insights.length} insights for venue: ${venueId}`);
   return validated;
 }
