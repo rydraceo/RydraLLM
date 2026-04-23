@@ -1,4 +1,4 @@
-// lib/sms/clicksend-service.ts
+// lib/sms/clicksend-service.ts - Using REST API directly
 
 export interface SendSMSParams {
   to: string;
@@ -14,47 +14,49 @@ export interface SendSMSResult {
   cost?: number;
 }
 
-function getClickSendClient() {
-  const username = process.env.CLICKSEND_USERNAME;
-  const apiKey = process.env.CLICKSEND_API_KEY;
-
-  if (!username || !apiKey) {
-    throw new Error('Missing ClickSend credentials. Check .env.local file.');
-  }
-
-  // Use require for CommonJS package
-  const ClickSend = require('clicksend');
-  const api = new ClickSend.SMSApi(username, apiKey);
-  return { api, ClickSend };
-}
-
 export async function sendSMS({
   to,
   message,
-  userId,
-  venueId,
 }: SendSMSParams): Promise<SendSMSResult> {
   try {
-    const { api: smsApi, ClickSend } = getClickSendClient();
+    const username = process.env.CLICKSEND_USERNAME;
+    const apiKey = process.env.CLICKSEND_API_KEY;
 
-    // Format phone number - ClickSend needs it without the + sign
+    if (!username || !apiKey) {
+      throw new Error('Missing ClickSend credentials');
+    }
+
     const cleanNumber = to.replace('+', '');
+    const from = process.env.CLICKSEND_SENDER_ID || 'ALKAMI';
 
-    const smsMessage = new ClickSend.SmsMessage();
-    smsMessage.source = 'rydra';
-    smsMessage.to = cleanNumber;
-    smsMessage.body = message;
-    smsMessage.from = process.env.CLICKSEND_SENDER_ID || 'ALKAMI';
-
-    const smsCollection = new ClickSend.SmsMessageCollection();
-    smsCollection.messages = [smsMessage];
+    const payload = {
+      messages: [
+        {
+          source: 'rydra',
+          to: cleanNumber,
+          body: message,
+          from: from,
+        },
+      ],
+    };
 
     console.log(`📤 Sending SMS to ${to}: "${message}"`);
 
-    const response = await smsApi.smsSendPost(smsCollection);
+    const auth = Buffer.from(`${username}:${apiKey}`).toString('base64');
 
-    if (response.body.response_code === 'SUCCESS') {
-      const msgData = response.body.data.messages[0];
+    const response = await fetch('https://rest.clicksend.com/v3/sms/send', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Basic ${auth}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+
+    if (data.response_code === 'SUCCESS' && data.data?.messages?.[0]) {
+      const msgData = data.data.messages[0];
       
       console.log(`✅ SMS sent! Message ID: ${msgData.message_id}, Status: ${msgData.status}`);
 
@@ -64,16 +66,13 @@ export async function sendSMS({
         cost: 0.08,
       };
     } else {
-      throw new Error(response.body.response_msg || 'Unknown error from ClickSend');
+      throw new Error(data.response_msg || 'Unknown error from ClickSend');
     }
   } catch (error) {
     console.error('❌ SMS send error:', error);
-
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-
     return {
       success: false,
-      error: errorMessage,
+      error: error instanceof Error ? error.message : 'Unknown error',
     };
   }
 }
@@ -82,14 +81,10 @@ export async function sendBulkSMS(
   messages: SendSMSParams[]
 ): Promise<SendSMSResult[]> {
   console.log(`📤 Sending ${messages.length} SMS messages via ClickSend...`);
-
   const results = await Promise.all(messages.map(msg => sendSMS(msg)));
-
   const successful = results.filter(r => r.success).length;
   const failed = results.filter(r => !r.success).length;
-
   console.log(`✅ Bulk SMS complete: ${successful} sent, ${failed} failed`);
   console.log(`💰 Total cost: $${(successful * 0.08).toFixed(2)} AUD`);
-
   return results;
 }
