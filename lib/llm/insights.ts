@@ -2,10 +2,19 @@ import { z } from 'zod';
 import { portkey } from './client';
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env['https://tqjdwufeeqjlnudwvayj.supabase.co']!,
-  process.env['eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRxamR3dWZlZXFqbG51ZHd2YXlqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjMxMDkzMywiZXhwIjoyMDkxODg2OTMzfQ.uw_Z9puHYxWJ2E9LrbTd9LHGMe8-wKwnUHoum1VGzIQ']!
-);
+// Create Supabase client inside the function instead of at module level
+function getSupabaseClient() {
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error(
+      'Missing Supabase credentials. Check .env.local file has NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY'
+    );
+  }
+
+  return createClient(supabaseUrl, supabaseKey);
+}
 
 export const InsightSchema = z.object({
   insights: z.array(
@@ -100,6 +109,8 @@ interface CustomerSegment {
 }
 
 async function getCustomerSegments(venueId: string): Promise<string> {
+  const supabase = getSupabaseClient(); // ← FIX: Add this line!
+  
   const { data: customers, error } = await supabase
     .from('customer_scores')
     .select('user_id, current_state, total_visits, days_since_last_visit, avg_visit_gap_days, gap_ratio')
@@ -160,7 +171,7 @@ VENUE CONTEXT:
 
 REVENUE CALCULATION:
 - Total recoverable: $${(atRiskRevenue + churnedRevenue + onFenceRevenue).toFixed(0)}
-- ROI on SMS campaign: ${((atRiskRevenue + onFenceRevenue) / (atRisk.length + onFence.length) * 0.07).toFixed(0)}:1
+- ROI on SMS campaign: ${((atRiskRevenue + onFenceRevenue) / ((atRisk.length + onFence.length) || 1) * 0.07).toFixed(0)}:1
 
 Generate insights focusing on the HIGHEST revenue opportunities with specific actionable SMS campaigns.
 `;
