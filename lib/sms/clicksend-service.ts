@@ -1,5 +1,4 @@
 // lib/sms/clicksend-service.ts
-const ClickSend = require('clicksend');
 
 export interface SendSMSParams {
   to: string;
@@ -23,8 +22,10 @@ function getClickSendClient() {
     throw new Error('Missing ClickSend credentials. Check .env.local file.');
   }
 
+  // Use require for CommonJS package
+  const ClickSend = require('clicksend');
   const api = new ClickSend.SMSApi(username, apiKey);
-  return api;
+  return { api, ClickSend };
 }
 
 export async function sendSMS({
@@ -34,7 +35,7 @@ export async function sendSMS({
   venueId,
 }: SendSMSParams): Promise<SendSMSResult> {
   try {
-    const smsApi = getClickSendClient();
+    const { api: smsApi, ClickSend } = getClickSendClient();
 
     // Format phone number - ClickSend needs it without the + sign
     const cleanNumber = to.replace('+', '');
@@ -60,7 +61,7 @@ export async function sendSMS({
       return {
         success: true,
         messageSid: msgData.message_id,
-        cost: 0.08, // $0.08 AUD per SMS
+        cost: 0.08,
       };
     } else {
       throw new Error(response.body.response_msg || 'Unknown error from ClickSend');
