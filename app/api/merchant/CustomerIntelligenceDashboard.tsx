@@ -133,7 +133,7 @@ function MetricCard({ title, value, subtitle, trend, color }: {
     </div>
   );
 }
- 
+
 function TabButton({ active, onClick, badge, children }: {
   active: boolean;
   onClick: () => void;
