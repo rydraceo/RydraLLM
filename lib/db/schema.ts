@@ -13,12 +13,32 @@ export const venues = pgTable('venues', {
 // ─── CUSTOMERS ─────────────────────────────────────────────────────────────
 export const customers = pgTable('customers', {
   id: uuid('id').primaryKey().defaultRandom(),
-  venue_id: uuid('venue_id').notNull().references(() => venues.id),
-  name: varchar('name', { length: 255 }).notNull(),
-  phone: varchar('phone', { length: 50 }).notNull(),
+  business_id: uuid('business_id'),
+  auth_user_id: uuid('auth_user_id'),
+  user_id: uuid('user_id').notNull(),
+  venue_id: uuid('venue_id'),  // Added back for MCP server compatibility
+  name: varchar('name', { length: 255 }),
+  phone: varchar('phone', { length: 50 }),
   email: varchar('email', { length: 255 }),
+  notes: text('notes'),
   created_at: timestamp('created_at').notNull().defaultNow(),
-  updated_at: timestamp('updated_at').notNull().defaultNow(),
+});
+ 
+// ─── CUSTOMER SCORES (Actual Supabase table) ───────────────────────────────
+export const customer_scores = pgTable('customer_scores', {
+  score_id: uuid('score_id').primaryKey().defaultRandom(),
+  user_id: uuid('user_id').notNull(),
+  venue_id: uuid('venue_id').notNull(),
+  current_state: varchar('current_state', { length: 10 }),
+  gap_ratio: decimal('gap_ratio', { precision: 10, scale: 2 }),
+  churn_score_10: decimal('churn_score_10', { precision: 5, scale: 4 }),
+  days_since_last_visit: integer('days_since_last_visit'),
+  avg_visit_gap_days: decimal('avg_visit_gap_days', { precision: 10, scale: 2 }),
+  total_visits: integer('total_visits'),
+  potential_revenue_cents: integer('potential_revenue_cents'),
+  loyalty_score: decimal('loyalty_score', { precision: 5, scale: 4 }),
+  clv_cents: integer('clv_cents'),
+  last_event_at: timestamp('last_event_at'),
 });
  
 // ─── CUSTOMER INTELLIGENCE (Markov predictions stored here) ─────────────────

@@ -1,100 +1,93 @@
 // lib/interventions/auto-triggers.ts
  
-import { generatePersonalizedIntervention } from '@/lib/markov/predictions.enhanced';  // ← Fixed path!
-import { sendSMS } from '@/lib/sms/clicksend-service';  // ← Your actual function name
-import { db, and, gte, eq, sql, customerIntelligence, customers, promoCodes } from '@/lib/db';
+import { generatePersonalizedIntervention } from '@/lib/markov/predictions.enhanced';
+import { sendSMS } from '@/lib/sms/clicksend-service';
+import { db } from '@/lib/db';
+import { customer_scores, customers, promoCodes } from '@/lib/db/schema';
+import { and, gte, eq, sql } from 'drizzle-orm';
  
 export async function autoTriggerInterventions(venueId: string) {
   console.log(`🎯 Auto-triggering interventions for venue ${venueId}...`);
  
   // Find at-risk customers who've hit the trigger point
-  const atRiskCustomers = await db.select({
-    intelligence: customerIntelligence,
-    customer: customers,
-  })
-  .from(customerIntelligence)
-  .innerJoin(customers, eq(customerIntelligence.customer_id, customers.id))
-  .where(
-    and(
-      eq(customers.venue_id, venueId),
-      gte(customerIntelligence.churn_score_30d, '0.35'), // 35%+ risk
-      gte(
-        customerIntelligence.days_since_last_visit,
-        sql`${customerIntelligence.avg_gap_days} * 0.85` // Hit trigger point
+  const atRiskCustomers = await db
+    .select({
+      score: customer_scores,
+      customer: customers,
+    })
+    .from(customer_scores)
+    .innerJoin(customers, eq(customer_scores.user_id, customers.user_id))
+    .where(
+      and(
+        eq(customer_scores.venue_id, venueId),
+        gte(customer_scores.churn_score_10, '0.35'), // 35%+ risk
+        gte(
+          customer_scores.days_since_last_visit,
+          sql`${customer_scores.avg_visit_gap_days} * 0.85` // Hit trigger point
+        )
       )
-    )
-  );
+    );
  
   console.log(`📱 Found ${atRiskCustomers.length} customers ready for intervention`);
  
-  for (const { intelligence, customer } of atRiskCustomers) {
+  let sent = 0;
+  let skipped = 0;
+ 
+  for (const row of atRiskCustomers) {
+    const { score, customer } = row;
+ 
     try {
-      // Parse stored values (Drizzle returns decimals as strings)
-      const churn_score_30d = parseFloat(intelligence.churn_score_30d || '0');
-      const loyalty_score = parseFloat(intelligence.loyalty_score || '0.5');
-      const gap_ratio = parseFloat(intelligence.gap_ratio || '1.0');
-      const avg_gap_days = parseFloat(intelligence.avg_gap_days || '28');
-      const clv_cents = intelligence.clv_cents || 5000;
-      
-      // Generate intervention with ALL required parameters
+      // Generate personalized intervention
       const intervention = generatePersonalizedIntervention(
-        intelligence.current_state as any, // BeautyState
-        churn_score_30d,
-        loyalty_score,
-        gap_ratio,
-        intelligence.days_since_last_visit || 0,
-        clv_cents,
-        customer.name,
-        undefined // preferred_barber_name - TODO: add this to schema
+        score.current_state as any,
+        parseFloat(score.churn_score_10 as any) || 0.5,
+        parseFloat(score.loyalty_score as any) || 0.5,
+        parseFloat(score.gap_ratio as any),
+        score.days_since_last_visit || 0,
+        score.clv_cents || 5000,
+        customer.name || 'Valued Customer',
+        undefined
       );
  
-      // Auto-send if ROI > 2.0x and discount < $30
-      if (intervention.expected_roi > 2.0 && 
-          intervention.discount_amount_cents < 3000) {
-        
-        // Send SMS via ClickSend (using YOUR function signature)
-        const smsResult = await sendSMS({
-          to: customer.phone,
-          message: intervention.message_template,  // ← 'message' not 'body'
-          userId: customer.id,
-          venueId: venueId,
-        });
+      const discountAmount = intervention.discount_amount_cents;
+      const expectedROI = intervention.expected_roi;
  
-        if (!smsResult.success) {
-          console.error(`❌ Failed to send SMS to ${customer.name}:`, smsResult.error);
-          continue;
-        }
- 
-        // Create single-use promo code
-        const promoCode = `COMEBACK${customer.id.slice(0, 6).toUpperCase()}`;
-        
-        await db.insert(promoCodes).values({
-          code: promoCode,
-          customer_id: customer.id,
-          discount_cents: intervention.discount_amount_cents,
-          max_uses: 1,
-          times_used: 0,
-          expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-        });
- 
-        console.log(
-          `✅ Sent intervention to ${customer.name}: ` +
-          `$${intervention.discount_amount_cents / 100} discount, ` +
-          `${intervention.expected_roi.toFixed(1)}x ROI expected, ` +
-          `code: ${promoCode}, ` +
-          `cost: $${smsResult.cost?.toFixed(2)} AUD`
-        );
-      } else {
-        console.log(
-          `⏭️  Skipped ${customer.name}: ` +
-          `ROI ${intervention.expected_roi.toFixed(1)}x or ` +
-          `discount $${intervention.discount_amount_cents / 100} out of threshold`
-        );
+      // Check ROI and discount thresholds
+      if (discountAmount > 3000 || expectedROI < 2.0) {
+        console.log(`⏭️  Skipping ${customer.name}: discount=${discountAmount}, ROI=${expectedROI}`);
+        skipped++;
+        continue;
       }
+ 
+      // Create promo code
+      const promoCode = `COMEBACK${score.user_id.substring(0, 6).toUpperCase()}`;
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7);
+ 
+      await db.insert(promoCodes).values({
+        code: promoCode,
+        customer_id: score.user_id,
+        discount_cents: discountAmount,
+        max_uses: 1,
+        times_used: 0,
+        expires_at: expiresAt,
+      });
+ 
+      // Send SMS
+      const message = `Hey ${customer.name}! We miss you at Alkami. Book now with code ${promoCode} for $${(discountAmount / 100).toFixed(0)} off! alkami.rydra.com`;
+ 
+      await sendSMS({
+        to: customer.phone || '',
+        message,
+      });
+ 
+      console.log(`✅ Sent intervention to ${customer.name}: $${discountAmount / 100} discount, ${expectedROI.toFixed(1)}x ROI expected, code: ${promoCode}`);
+      sent++;
     } catch (error) {
-      console.error(`❌ Error processing ${customer.name}:`, error);
+      console.error(`❌ Failed to send intervention to ${customer.name}:`, error);
     }
   }
  
-  console.log(`✅ Auto-trigger interventions completed`);
+  console.log(`✨ Intervention run complete: ${sent} sent, ${skipped} skipped`);
+  return { sent, skipped };
 }

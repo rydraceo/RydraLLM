@@ -6,7 +6,9 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { db, eq, and, gte, availableSlots, bookings, customers } from '@/lib/db';
+import { db } from '@/lib/db';
+import { availableSlots, bookings, customers } from '@/lib/db/schema';
+import { eq, and, gte } from 'drizzle-orm';
  
 const server = new Server(
   {
@@ -163,6 +165,7 @@ async function createBooking(params: {
  
   if (!customer) {
     const [newCustomer] = await db.insert(customers).values({
+      user_id: crypto.randomUUID(),  // Generate UUID for user_id
       venue_id: params.venue_id,
       name: params.customer_name,
       phone: params.customer_phone,
@@ -210,4 +213,3 @@ async function main() {
 }
  
 main().catch(console.error);
- 

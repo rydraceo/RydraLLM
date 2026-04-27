@@ -1,145 +1,238 @@
 // app/merchant/dashboard/page.tsx
 'use client';
-
+ 
 import { useEffect, useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
-interface Customer {
+import { db } from '@/lib/db';
+import { customer_scores, customers } from '@/lib/db/schema';
+import { eq, and } from 'drizzle-orm';
+ 
+interface AtRiskCustomer {
   user_id: string;
+  name: string;
+  email: string;
+  phone: string;
   current_state: string;
-  total_visits: number;
+  gap_ratio: number;
   days_since_last_visit: number;
   avg_visit_gap_days: number;
-  gap_ratio: number;
-  risk_segment: string;
+  total_visits: number;
+  potential_revenue_cents: number;
+  churn_score_10: number | null;
 }
-
-export default function MerchantDashboard() {
-  const [customers, setCustomers] = useState<Customer[]>([]);
+ 
+interface RevenueStats {
+  churned_customers: number;
+  at_risk_customers: number;
+  total_potential_revenue: number;
+  avg_gap_ratio: number;
+}
+ 
+export default function DemandIntelligenceDashboard() {
+  const [atRiskCustomers, setAtRiskCustomers] = useState<AtRiskCustomer[]>([]);
+  const [stats, setStats] = useState<RevenueStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({
-    total: 0,
-    at_risk: 0,
-    churned: 0,
-    revenue_opportunity: 0,
-  });
-
+  const [sendingIntervention, setSendingIntervention] = useState<string | null>(null);
+ 
+  const ALKAMI_VENUE_ID = 'e1a6c15d-8ccc-4f58-aefb-8bea46e39918';
+ 
   useEffect(() => {
-    loadCustomers();
+    fetchDemandIntelligence();
   }, []);
-
-  async function loadCustomers() {
-    const { data, error } = await supabase
-      .from('customer_scores')
-      .select('*')
-      .eq('venue_id', 'e1a6c15d-8ccc-4f58-aefb-8bea46e39918')
-      .order('gap_ratio', { ascending: false });
-
-    if (data) {
-      const enriched = data.map((c) => ({
-        ...c,
-        risk_segment: getRiskSegment(c.gap_ratio, c.current_state),
+ 
+  async function fetchDemandIntelligence() {
+    try {
+      // Fetch at-risk customers with names using Drizzle ORM
+      const results = await db
+        .select({
+          user_id: customer_scores.user_id,
+          current_state: customer_scores.current_state,
+          gap_ratio: customer_scores.gap_ratio,
+          days_since_last_visit: customer_scores.days_since_last_visit,
+          avg_visit_gap_days: customer_scores.avg_visit_gap_days,
+          total_visits: customer_scores.total_visits,
+          potential_revenue_cents: customer_scores.potential_revenue_cents,
+          churn_score_10: customer_scores.churn_score_10,
+          name: customers.name,
+          email: customers.email,
+          phone: customers.phone,
+        })
+        .from(customer_scores)
+        .leftJoin(customers, eq(customer_scores.user_id, customers.user_id))
+        .where(
+          and(
+            eq(customer_scores.venue_id, ALKAMI_VENUE_ID),
+            eq(customer_scores.current_state, 'X')  // Churned only
+          )
+        )
+        .orderBy(customer_scores.gap_ratio)
+        .limit(20);
+ 
+      // Transform to our interface
+      const transformed: AtRiskCustomer[] = results.map((r) => ({
+        user_id: r.user_id || '',
+        name: r.name || 'Unknown',
+        email: r.email || '',
+        phone: r.phone || '',
+        current_state: r.current_state || 'X',
+        gap_ratio: parseFloat(r.gap_ratio as string) || 0,
+        days_since_last_visit: r.days_since_last_visit || 0,
+        avg_visit_gap_days: parseFloat(r.avg_visit_gap_days as string) || 0,
+        total_visits: r.total_visits || 0,
+        potential_revenue_cents: r.potential_revenue_cents || 0,
+        churn_score_10: r.churn_score_10 ? parseFloat(r.churn_score_10 as string) : null,
       }));
-
-      setCustomers(enriched);
-      
+ 
+      setAtRiskCustomers(transformed);
+ 
       // Calculate stats
-      const atRisk = enriched.filter(c => c.gap_ratio > 1.3 && c.gap_ratio <= 2.5).length;
-      const churned = enriched.filter(c => c.gap_ratio > 2.5).length;
-      
+      const total_revenue = transformed.reduce((sum, c) => sum + (c.potential_revenue_cents || 0), 0);
+      const avg_gap = transformed.reduce((sum, c) => sum + c.gap_ratio, 0) / (transformed.length || 1);
+ 
       setStats({
-        total: enriched.length,
-        at_risk: atRisk,
-        churned: churned,
-        revenue_opportunity: (atRisk + churned) * 70,
+        churned_customers: transformed.filter(c => c.current_state === 'X').length,
+        at_risk_customers: transformed.filter(c => c.gap_ratio > 1.3).length,
+        total_potential_revenue: total_revenue,
+        avg_gap_ratio: avg_gap,
       });
+ 
+      setLoading(false);
+    } catch (err) {
+      console.error('Error fetching demand intelligence:', err);
+      setLoading(false);
     }
-
-    setLoading(false);
   }
-
-  function getRiskSegment(gapRatio: number, state: string): string {
-    if (gapRatio > 2.5) return 'Churned';
-    if (gapRatio > 1.3 && state === 'R') return 'At Risk';
-    if (gapRatio > 1.0) return 'On Fence';
-    return 'Loyal';
+ 
+  async function sendIntervention(customer: AtRiskCustomer) {
+    setSendingIntervention(customer.user_id);
+    
+    try {
+      // Call your intervention API
+      const response = await fetch('/api/interventions/send-one', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: customer.user_id,
+          venue_id: ALKAMI_VENUE_ID,
+        }),
+      });
+ 
+      if (!response.ok) throw new Error('Failed to send intervention');
+ 
+      alert(`Intervention sent to ${customer.name}!`);
+      fetchDemandIntelligence(); // Refresh data
+    } catch (err) {
+      console.error('Error sending intervention:', err);
+      alert('Failed to send intervention');
+    } finally {
+      setSendingIntervention(null);
+    }
   }
-
-  if (loading) return <div className="p-8">Loading...</div>;
-
-  return (
-    <div className="p-8 max-w-7xl mx-auto">
-      <h1 className="text-3xl font-bold mb-8">Alkami Customer Intelligence</h1>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-4 gap-4 mb-8">
-        <div className="bg-white p-6 rounded-lg shadow">
-          <div className="text-sm text-gray-600">Total Customers</div>
-          <div className="text-3xl font-bold">{stats.total}</div>
-        </div>
-        <div className="bg-orange-50 p-6 rounded-lg shadow">
-          <div className="text-sm text-orange-600">At Risk</div>
-          <div className="text-3xl font-bold text-orange-600">{stats.at_risk}</div>
-        </div>
-        <div className="bg-red-50 p-6 rounded-lg shadow">
-          <div className="text-sm text-red-600">Churned</div>
-          <div className="text-3xl font-bold text-red-600">{stats.churned}</div>
-        </div>
-        <div className="bg-green-50 p-6 rounded-lg shadow">
-          <div className="text-sm text-green-600">Recovery Potential</div>
-          <div className="text-3xl font-bold text-green-600">${stats.revenue_opportunity}</div>
+ 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading demand intelligence...</p>
         </div>
       </div>
-
-      {/* At-Risk Customers Table */}
-      <div className="bg-white rounded-lg shadow">
-        <div className="p-6 border-b">
-          <h2 className="text-xl font-bold">Customers Needing Attention</h2>
+    );
+  }
+ 
+  return (
+    <div className="min-h-screen bg-gray-50 p-8">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900">Demand Intelligence</h1>
+          <p className="text-gray-600 mt-2">AI-powered customer recovery for Alkami Barbershop</p>
         </div>
-        <table className="w-full">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Risk</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">User ID</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Visits</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Days Since</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gap Ratio</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200">
-            {customers
-              .filter(c => c.gap_ratio > 1.0)
-              .slice(0, 50)
-              .map((customer) => (
-                <tr key={customer.user_id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 text-xs rounded-full ${
-                      customer.risk_segment === 'Churned' ? 'bg-red-100 text-red-800' :
-                      customer.risk_segment === 'At Risk' ? 'bg-orange-100 text-orange-800' :
-                      'bg-yellow-100 text-yellow-800'
-                    }`}>
-                      {customer.risk_segment}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-sm font-mono">{customer.user_id.slice(0, 8)}...</td>
-                  <td className="px-6 py-4 text-sm">{customer.total_visits}</td>
-                  <td className="px-6 py-4 text-sm">{customer.days_since_last_visit}</td>
-                  <td className="px-6 py-4 text-sm font-bold">{customer.gap_ratio.toFixed(2)}</td>
-                  <td className="px-6 py-4">
-                    <button className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
-                      Send SMS
-                    </button>
-                  </td>
+ 
+        {/* Stats Cards */}
+        {stats && (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div className="bg-white rounded-lg shadow p-6">
+              <p className="text-sm font-medium text-gray-600">Churned Customers</p>
+              <p className="text-3xl font-bold text-red-600 mt-2">{stats.churned_customers}</p>
+            </div>
+            <div className="bg-white rounded-lg shadow p-6">
+              <p className="text-sm font-medium text-gray-600">High Risk (Gap {'>'} 1.3x)</p>
+              <p className="text-3xl font-bold text-orange-600 mt-2">{stats.at_risk_customers}</p>
+            </div>
+            <div className="bg-white rounded-lg shadow p-6">
+              <p className="text-sm font-medium text-gray-600">Revenue at Risk</p>
+              <p className="text-3xl font-bold text-green-600 mt-2">${(stats.total_potential_revenue / 100).toFixed(0)}</p>
+            </div>
+            <div className="bg-white rounded-lg shadow p-6">
+              <p className="text-sm font-medium text-gray-600">Avg Gap Ratio</p>
+              <p className="text-3xl font-bold text-blue-600 mt-2">{stats.avg_gap_ratio.toFixed(2)}x</p>
+            </div>
+          </div>
+        )}
+ 
+        {/* At-Risk Customer Table */}
+        <div className="bg-white rounded-lg shadow">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-900">At-Risk Customers</h2>
+            <p className="text-sm text-gray-600 mt-1">Sorted by urgency (highest gap ratio first)</p>
+          </div>
+          
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Gap Ratio</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Days Overdue</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Visits</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Potential $</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
                 </tr>
-              ))}
-          </tbody>
-        </table>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {atRiskCustomers.map((customer) => (
+                  <tr key={customer.user_id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div>
+                        <div className="text-sm font-medium text-gray-900">{customer.name}</div>
+                        <div className="text-sm text-gray-500">{customer.email}</div>
+                        <div className="text-xs text-gray-400">{customer.phone}</div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
+                        Churned
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900 font-semibold">{customer.gap_ratio.toFixed(2)}x</div>
+                      <div className="text-xs text-gray-500">vs {customer.avg_visit_gap_days}d avg</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {customer.days_since_last_visit} days
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {customer.total_visits}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-green-600">
+                      ${(customer.potential_revenue_cents / 100).toFixed(0)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <button
+                        onClick={() => sendIntervention(customer)}
+                        disabled={sendingIntervention === customer.user_id}
+                        className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                      >
+                        {sendingIntervention === customer.user_id ? 'Sending...' : 'Send SMS'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
   );
