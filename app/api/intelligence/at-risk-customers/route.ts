@@ -1,80 +1,85 @@
 // app/api/intelligence/at-risk-customers/route.ts
+// CORRECT VERSION - Uses business_id (not venue_id)
+ 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { customer_scores, customers } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { customers, customer_scores } from '@/lib/db/schema';
+import { eq, sql } from 'drizzle-orm';
  
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const venueId = searchParams.get('venue_id');
+    const business_id = searchParams.get('venue_id'); // Keep param name for backward compatibility
  
-    if (!venueId) {
+    if (!business_id) {
       return NextResponse.json(
-        { error: 'venue_id required' },
+        { error: 'venue_id parameter is required' },
         { status: 400 }
       );
     }
  
-    // Fetch at-risk customers with names
+    console.log('[API] Fetching customers for business:', business_id);
+ 
+    // Query customers with correct column name: business_id
     const results = await db
       .select({
-        user_id: customer_scores.user_id,
-        current_state: customer_scores.current_state,
-        gap_ratio: customer_scores.gap_ratio,
-        days_since_last_visit: customer_scores.days_since_last_visit,
-        avg_visit_gap_days: customer_scores.avg_visit_gap_days,
-        total_visits: customer_scores.total_visits,
-        potential_revenue_cents: customer_scores.potential_revenue_cents,
-        churn_score_10: customer_scores.churn_score_10,
+        user_id: customers.id,
         name: customers.name,
         email: customers.email,
         phone: customers.phone,
+        current_state: customers.current_state,
+        gap_ratio: customers.gap_ratio,
+        days_since_last_visit: sql<number>`
+          CASE 
+            WHEN ${customers.last_order_date} IS NOT NULL 
+            THEN EXTRACT(DAY FROM NOW() - ${customers.last_order_date})::INTEGER
+            ELSE 0
+          END
+        `,
+        avg_visit_gap_days: sql<number>`
+          COALESCE((${customers.avg_visit_gap_hours} / 24)::INTEGER, 0)
+        `,
+        total_visits: customers.total_orders,
+        potential_revenue_cents: customer_scores.intervention_value_cents,
+        churn_score_10: customer_scores.churn_score_10,
       })
-      .from(customer_scores)
-      .leftJoin(customers, eq(customer_scores.user_id, customers.user_id))
-      .where(
-        and(
-          eq(customer_scores.venue_id, venueId),
-          eq(customer_scores.current_state, 'X')
-        )
-      )
-      .limit(50);
+      .from(customers)
+      .leftJoin(customer_scores, eq(customers.id, customer_scores.customer_id))
+      .where(eq(customers.business_id, business_id))  // ← FIXED: business_id
+      .orderBy(sql`${customers.gap_ratio} DESC NULLS LAST`)
+      .limit(100);
  
-    // Transform decimals to numbers
-    const customers_list = results.map((r) => ({
-      user_id: r.user_id || '',
-      name: r.name || 'Unknown',
-      email: r.email || '',
-      phone: r.phone || '',
-      current_state: r.current_state || 'X',
-      gap_ratio: parseFloat(r.gap_ratio as string) || 0,
-      days_since_last_visit: r.days_since_last_visit || 0,
-      avg_visit_gap_days: parseFloat(r.avg_visit_gap_days as string) || 0,
-      total_visits: r.total_visits || 0,
-      potential_revenue_cents: r.potential_revenue_cents || 0,
-      churn_score_10: r.churn_score_10 ? parseFloat(r.churn_score_10 as string) : null,
-    }));
+    console.log('[API] Found customers:', results.length);
  
     // Calculate stats
-    const total_revenue = customers_list.reduce((sum, c) => sum + c.potential_revenue_cents, 0);
-    const avg_gap = customers_list.reduce((sum, c) => sum + c.gap_ratio, 0) / (customers_list.length || 1);
- 
-    const stats = {
-      churned_customers: customers_list.filter(c => c.current_state === 'X').length,
-      at_risk_customers: customers_list.filter(c => c.gap_ratio > 1.3).length,
-      total_potential_revenue: total_revenue,
-      avg_gap_ratio: avg_gap,
-    };
+    const churned_customers = results.filter(c => c.current_state === 'X').length;
+    const at_risk_customers = results.filter(c => 
+      c.gap_ratio && c.gap_ratio > 1.3 && c.current_state !== 'X'
+    ).length;
+    const total_potential_revenue = results.reduce((sum, c) => 
+      sum + (c.potential_revenue_cents || 0), 0
+    );
+    const avg_gap_ratio = results.length > 0 
+      ? results.reduce((sum, c) => sum + (c.gap_ratio || 0), 0) / results.length
+      : 0;
  
     return NextResponse.json({
-      customers: customers_list,
-      stats,
+      customers: results,
+      stats: {
+        churned_customers,
+        at_risk_customers,
+        total_potential_revenue,
+        avg_gap_ratio: Math.round(avg_gap_ratio * 100) / 100,
+      },
     });
+ 
   } catch (error) {
-    console.error('Error fetching at-risk customers:', error);
+    console.error('[API] Error:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unknown error' },
+      { 
+        error: 'Failed to fetch customer data',
+        details: error instanceof Error ? error.message : String(error),
+      },
       { status: 500 }
     );
   }
