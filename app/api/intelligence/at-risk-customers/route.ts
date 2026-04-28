@@ -1,82 +1,57 @@
 // app/api/intelligence/at-risk-customers/route.ts
-// FINAL CORRECT VERSION - Uses actual schema: user_id and venue_id
+// SIMPLE VERSION - Just get the damn data
  
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { customers, customer_scores } from '@/lib/db/schema';
-import { eq, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
  
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const venue_id = searchParams.get('venue_id');
+    const venue_id = searchParams.get('venue_id') || 'e1a6c15d-8ccc-4f58-aefb-8bea46e39918';
  
-    if (!venue_id) {
-      return NextResponse.json(
-        { error: 'venue_id parameter is required' },
-        { status: 400 }
-      );
-    }
+    console.log('[API] Fetching for venue:', venue_id);
  
-    console.log('[API] Fetching customers for venue:', venue_id);
+    // RAW SQL - No guessing, just query what actually exists
+    const results = await db.execute(sql`
+      SELECT 
+        c.user_id,
+        c.name,
+        c.email,
+        c.phone,
+        c.gap_ratio,
+        c.total_orders as total_visits,
+        c.current_state,
+        EXTRACT(DAY FROM NOW() - c.last_order_date)::INTEGER as days_since_last_visit,
+        (c.avg_visit_gap_hours / 24)::INTEGER as avg_visit_gap_days,
+        COALESCE(cs.clv_cents, 0) as potential_revenue_cents,
+        cs.churn_score_10
+      FROM customers c
+      INNER JOIN customer_scores cs ON c.user_id = cs.user_id
+      WHERE cs.venue_id = ${venue_id}
+      ORDER BY c.gap_ratio DESC NULLS LAST
+      LIMIT 100
+    `);
  
-    // Query with CORRECT column names:
-    // - customers.user_id = customer_scores.user_id (JOIN)
-    // - customer_scores.venue_id (FILTER)
-    const results = await db
-      .select({
-        user_id: customers.user_id,
-        name: customers.name,
-        email: customers.email,
-        phone: customers.phone,
-        current_state: customer_scores.current_state,
-        gap_ratio: customers.gap_ratio,
-        days_since_last_visit: sql<number>`
-          CASE 
-            WHEN ${customers.last_order_date} IS NOT NULL 
-            THEN EXTRACT(DAY FROM NOW() - ${customers.last_order_date})::INTEGER
-            ELSE 0
-          END
-        `,
-        avg_visit_gap_days: sql<number>`
-          COALESCE((${customers.avg_visit_gap_hours} / 24)::INTEGER, 0)
-        `,
-        total_visits: customers.total_orders,
-        potential_revenue_cents: sql<number>`
-          COALESCE(${customer_scores.clv_cents}, 0)
-        `,
-        churn_score_10: customer_scores.churn_score_10,
-      })
-      .from(customers)
-      .innerJoin(
-        customer_scores, 
-        eq(customers.user_id, customer_scores.user_id)  // ← FIXED: user_id join
-      )
-      .where(eq(customer_scores.venue_id, venue_id))    // ← FIXED: venue_id filter
-      .orderBy(sql`${customers.gap_ratio} DESC NULLS LAST`)
-      .limit(100);
- 
-    console.log('[API] Found customers:', results.length);
+    const customers = results as any[];
+    
+    console.log('[API] Found:', customers.length);
  
     // Calculate stats
-    const churned_customers = results.filter(c => c.current_state === 'X').length;
-    const at_risk_customers = results.filter(c => 
-      c.gap_ratio && c.gap_ratio > 1.3 && c.current_state !== 'X'
-    ).length;
-    const total_potential_revenue = results.reduce((sum, c) => 
-      sum + (c.potential_revenue_cents || 0), 0
-    );
-    const avg_gap_ratio = results.length > 0 
-      ? results.reduce((sum, c) => sum + (c.gap_ratio || 0), 0) / results.length
+    const churned = customers.filter(c => c.current_state === 'X').length;
+    const at_risk = customers.filter(c => c.gap_ratio > 1.3 && c.current_state !== 'X').length;
+    const total_revenue = customers.reduce((sum, c) => sum + (c.potential_revenue_cents || 0), 0);
+    const avg_gap = customers.length > 0 
+      ? customers.reduce((sum, c) => sum + (c.gap_ratio || 0), 0) / customers.length 
       : 0;
  
     return NextResponse.json({
-      customers: results,
+      customers: customers,
       stats: {
-        churned_customers,
-        at_risk_customers,
-        total_potential_revenue,
-        avg_gap_ratio: Math.round(avg_gap_ratio * 100) / 100,
+        churned_customers: churned,
+        at_risk_customers: at_risk,
+        total_potential_revenue: total_revenue,
+        avg_gap_ratio: Math.round(avg_gap * 100) / 100,
       },
     });
  
