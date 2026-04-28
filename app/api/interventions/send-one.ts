@@ -1,4 +1,3 @@
-// app/api/interventions/send-one/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { customer_scores, customers, promoCodes } from '@/lib/db/schema';
@@ -85,12 +84,13 @@ export async function POST(request: NextRequest) {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);
  
+    // ← FIXED: Match schema fields
     await db.insert(promoCodes).values({
       code: promoCode,
       customer_id: user_id,
+      user_id: user_id,
+      venue_id: venue_id,
       discount_cents: discountAmount,
-      max_uses: 1,
-      times_used: 0,
       expires_at: expiresAt,
     });
  
