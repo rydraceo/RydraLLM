@@ -31,6 +31,11 @@ export const customer_scores = pgTable('customer_scores', {
   last_event_at: timestamp('last_event_at'),
   total_visits: integer('total_visits'),
   
+  // Demand intelligence metrics
+  gap_ratio: real('gap_ratio'),
+  days_since_last_visit: integer('days_since_last_visit'),
+  avg_visit_gap_days: integer('avg_visit_gap_days'),
+  
   churn_score_5: real('churn_score_5'),
   churn_score_10: real('churn_score_10'),
   loyalty_score: real('loyalty_score'),
