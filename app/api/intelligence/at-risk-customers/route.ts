@@ -1,5 +1,5 @@
 // app/api/intelligence/at-risk-customers/route.ts
-// CORRECT VERSION - Uses business_id (not venue_id)
+// FINAL CORRECT VERSION - Uses actual schema: user_id and venue_id
  
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
@@ -9,25 +9,27 @@ import { eq, sql } from 'drizzle-orm';
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const business_id = searchParams.get('venue_id'); // Keep param name for backward compatibility
+    const venue_id = searchParams.get('venue_id');
  
-    if (!business_id) {
+    if (!venue_id) {
       return NextResponse.json(
         { error: 'venue_id parameter is required' },
         { status: 400 }
       );
     }
  
-    console.log('[API] Fetching customers for business:', business_id);
+    console.log('[API] Fetching customers for venue:', venue_id);
  
-    // Query customers with correct column name: business_id
+    // Query with CORRECT column names:
+    // - customers.user_id = customer_scores.user_id (JOIN)
+    // - customer_scores.venue_id (FILTER)
     const results = await db
       .select({
-        user_id: customers.id,
+        user_id: customers.user_id,
         name: customers.name,
         email: customers.email,
         phone: customers.phone,
-        current_state: customers.current_state,
+        current_state: customer_scores.current_state,
         gap_ratio: customers.gap_ratio,
         days_since_last_visit: sql<number>`
           CASE 
@@ -40,12 +42,17 @@ export async function GET(request: NextRequest) {
           COALESCE((${customers.avg_visit_gap_hours} / 24)::INTEGER, 0)
         `,
         total_visits: customers.total_orders,
-        potential_revenue_cents: customer_scores.intervention_value_cents,
+        potential_revenue_cents: sql<number>`
+          COALESCE(${customer_scores.clv_cents}, 0)
+        `,
         churn_score_10: customer_scores.churn_score_10,
       })
       .from(customers)
-      .leftJoin(customer_scores, eq(customers.id, customer_scores.customer_id))
-      .where(eq(customers.business_id, business_id))  // ← FIXED: business_id
+      .innerJoin(
+        customer_scores, 
+        eq(customers.user_id, customer_scores.user_id)  // ← FIXED: user_id join
+      )
+      .where(eq(customer_scores.venue_id, venue_id))    // ← FIXED: venue_id filter
       .orderBy(sql`${customers.gap_ratio} DESC NULLS LAST`)
       .limit(100);
  
