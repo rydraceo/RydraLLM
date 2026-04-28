@@ -48,10 +48,12 @@ export const customer_scores = pgTable('customer_scores', {
 export const promoCodes = pgTable('promo_codes', {
   id: uuid('id').primaryKey().defaultRandom(),
   code: text('code').notNull(),
+  customer_id: uuid('customer_id').notNull(),
   user_id: uuid('user_id').notNull(),
   venue_id: uuid('venue_id').notNull(),
-  discount_percent: integer('discount_percent'),
+  discount_amount: integer('discount_amount'),
+  discount_cents: integer('discount_cents'),
   expires_at: timestamp('expires_at'),
   used: boolean('used').default(false),
   created_at: timestamp('created_at').defaultNow(),
-});
+}); 

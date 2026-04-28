@@ -20,7 +20,7 @@ export async function autoTriggerInterventions(venueId: string) {
     .where(
       and(
         eq(customer_scores.venue_id, venueId),
-        gte(customer_scores.churn_score_10, '0.35'), // 35%+ risk
+        gte(customer_scores.churn_score_10, 0.35), // ← FIXED: number instead of string
         gte(
           customer_scores.days_since_last_visit,
           sql`${customer_scores.avg_visit_gap_days} * 0.85` // Hit trigger point
@@ -64,12 +64,13 @@ export async function autoTriggerInterventions(venueId: string) {
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 7);
  
+      // ← FIXED: Match schema fields
       await db.insert(promoCodes).values({
         code: promoCode,
         customer_id: score.user_id,
+        user_id: score.user_id,
+        venue_id: venueId,
         discount_cents: discountAmount,
-        max_uses: 1,
-        times_used: 0,
         expires_at: expiresAt,
       });
  
