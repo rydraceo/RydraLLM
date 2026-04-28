@@ -1,18 +1,11 @@
-// app/api/intelligence/at-risk-customers/route.ts
-// SIMPLE VERSION - Just get the damn data
- 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { sql } from 'drizzle-orm';
- 
+
 export async function GET(request: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams;
-    const venue_id = searchParams.get('venue_id') || 'e1a6c15d-8ccc-4f58-aefb-8bea46e39918';
- 
-    console.log('[API] Fetching for venue:', venue_id);
- 
-    // RAW SQL - No guessing, just query what actually exists
+    const venue_id = request.nextUrl.searchParams.get('venue_id') || 'e1a6c15d-8ccc-4f58-aefb-8bea46e39918';
+
     const results = await db.execute(sql`
       SELECT 
         c.user_id,
@@ -31,22 +24,17 @@ export async function GET(request: NextRequest) {
       WHERE cs.venue_id = ${venue_id}
       ORDER BY c.gap_ratio DESC NULLS LAST
       LIMIT 100
-    `);
- 
-    const customers = results as any[];
-    
-    console.log('[API] Found:', customers.length);
- 
-    // Calculate stats
-    const churned = customers.filter(c => c.current_state === 'X').length;
-    const at_risk = customers.filter(c => c.gap_ratio > 1.3 && c.current_state !== 'X').length;
-    const total_revenue = customers.reduce((sum, c) => sum + (c.potential_revenue_cents || 0), 0);
-    const avg_gap = customers.length > 0 
-      ? customers.reduce((sum, c) => sum + (c.gap_ratio || 0), 0) / customers.length 
+    `) as any[];
+
+    const churned = results.filter(c => c.current_state === 'X').length;
+    const at_risk = results.filter(c => c.gap_ratio > 1.3 && c.current_state !== 'X').length;
+    const total_revenue = results.reduce((sum, c) => sum + (c.potential_revenue_cents || 0), 0);
+    const avg_gap = results.length > 0 
+      ? results.reduce((sum, c) => sum + (c.gap_ratio || 0), 0) / results.length 
       : 0;
- 
+
     return NextResponse.json({
-      customers: customers,
+      customers: results,
       stats: {
         churned_customers: churned,
         at_risk_customers: at_risk,
@@ -54,14 +42,11 @@ export async function GET(request: NextRequest) {
         avg_gap_ratio: Math.round(avg_gap * 100) / 100,
       },
     });
- 
+
   } catch (error) {
     console.error('[API] Error:', error);
     return NextResponse.json(
-      { 
-        error: 'Failed to fetch customer data',
-        details: error instanceof Error ? error.message : String(error),
-      },
+      { error: 'Failed to fetch customer data', details: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
