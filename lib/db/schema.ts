@@ -1,23 +1,21 @@
 // lib/db/schema.ts
-// FINAL SCHEMA - Matches your actual Supabase database
+// Complete schema for Rydra demand intelligence
  
-import { pgTable, uuid, text, timestamp, integer, real } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, integer, real, boolean } from 'drizzle-orm/pg-core';
  
 export const customers = pgTable('customers', {
   id: uuid('id').primaryKey().defaultRandom(),
   business_id: uuid('business_id').notNull(),
   auth_user_id: uuid('auth_user_id'),
-  user_id: uuid('user_id'),  // Links to customer_scores
+  user_id: uuid('user_id'),
   
-  // Basic info
   name: text('name'),
   email: text('email'),
   phone: text('phone'),
   notes: text('notes'),
   created_at: timestamp('created_at').defaultNow(),
   
-  // Demand intelligence columns (added via migration)
-  current_state: text('current_state'), // B, D, C, O, R, X
+  current_state: text('current_state'),
   gap_ratio: real('gap_ratio'),
   avg_visit_gap_hours: real('avg_visit_gap_hours'),
   total_orders: integer('total_orders').default(0),
@@ -26,14 +24,13 @@ export const customers = pgTable('customers', {
  
 export const customer_scores = pgTable('customer_scores', {
   score_id: uuid('score_id').primaryKey().defaultRandom(),
-  user_id: uuid('user_id').notNull(),       // Links to customers.user_id
-  venue_id: uuid('venue_id').notNull(),     // Filter by venue
+  user_id: uuid('user_id').notNull(),
+  venue_id: uuid('venue_id').notNull(),
   
   current_state: text('current_state'),
   last_event_at: timestamp('last_event_at'),
   total_visits: integer('total_visits'),
   
-  // Scoring metrics
   churn_score_5: real('churn_score_5'),
   churn_score_10: real('churn_score_10'),
   loyalty_score: real('loyalty_score'),
@@ -41,4 +38,15 @@ export const customer_scores = pgTable('customer_scores', {
   intervention_value_cents: integer('intervention_value_cents'),
   
   updated_at: timestamp('updated_at').defaultNow(),
+});
+ 
+export const promoCodes = pgTable('promo_codes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  code: text('code').notNull(),
+  user_id: uuid('user_id').notNull(),
+  venue_id: uuid('venue_id').notNull(),
+  discount_percent: integer('discount_percent'),
+  expires_at: timestamp('expires_at'),
+  used: boolean('used').default(false),
+  created_at: timestamp('created_at').defaultNow(),
 });
