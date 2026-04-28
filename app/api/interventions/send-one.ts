@@ -84,15 +84,14 @@ export async function POST(request: NextRequest) {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);
  
-    // ← FIXED: Match schema fields
     await db.insert(promoCodes).values({
-      code: promoCode,
-      customer_id: user_id,
-      user_id: user_id,
-      venue_id: venue_id,
-      discount_cents: discountAmount,
-      expires_at: expiresAt,
-    });
+  code: promoCode,
+  customer_id: user_id,
+  user_id: user_id,      // ← ADDED
+  venue_id: venue_id,    // ← ADDED
+  discount_cents: discountAmount,
+  expires_at: expiresAt,
+});
  
     // Send SMS
     const smsMessage = `Hey ${customer.name}! We miss you at Alkami. Book now with code ${promoCode} for $${(discountAmount / 100).toFixed(0)} off! alkami.rydra.com`;
