@@ -84,11 +84,11 @@ export async function POST(request: NextRequest) {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);
  
-    await db.insert(promoCodes).values({
+await db.insert(promoCodes).values({
   code: promoCode,
   customer_id: user_id,
-  user_id: user_id,      // ← ADDED
-  venue_id: venue_id,    // ← ADDED
+  user_id: user_id,
+  venue_id: venue_id,
   discount_cents: discountAmount,
   expires_at: expiresAt,
 });
