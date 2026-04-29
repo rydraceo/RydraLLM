@@ -1,11 +1,12 @@
 // lib/db/schema.ts
-// Complete schema for Rydra demand intelligence
+// Complete schema for Rydra demand intelligence + MCP bookings
  
 import { pgTable, uuid, text, timestamp, integer, real, boolean } from 'drizzle-orm/pg-core';
  
 export const customers = pgTable('customers', {
   id: uuid('id').primaryKey().defaultRandom(),
   business_id: uuid('business_id').notNull(),
+  venue_id: uuid('venue_id'),
   auth_user_id: uuid('auth_user_id'),
   user_id: uuid('user_id'),
   
@@ -58,12 +59,16 @@ export const promoCodes = pgTable('promo_codes', {
   created_at: timestamp('created_at').defaultNow(),
 });
  
+// MCP Server tables
 export const bookings = pgTable('bookings', {
   id: uuid('id').primaryKey().defaultRandom(),
   customer_id: uuid('customer_id').notNull(),
   venue_id: uuid('venue_id').notNull(),
+  slot_id: uuid('slot_id'),
   service_id: uuid('service_id'),
-  slot_time: timestamp('slot_time').notNull(),
+  barber_name: text('barber_name'),
+  slot_time: timestamp('slot_time'),
+  scheduled_at: timestamp('scheduled_at'),
   status: text('status').default('pending'),
   created_at: timestamp('created_at').defaultNow(),
 });
@@ -71,7 +76,10 @@ export const bookings = pgTable('bookings', {
 export const availableSlots = pgTable('available_slots', {
   id: uuid('id').primaryKey().defaultRandom(),
   venue_id: uuid('venue_id').notNull(),
+  barber_name: text('barber_name'),
+  start_time: timestamp('start_time').notNull(),
   slot_time: timestamp('slot_time').notNull(),
   is_available: boolean('is_available').default(true),
+  is_booked: boolean('is_booked').default(false),
   created_at: timestamp('created_at').defaultNow(),
 });
