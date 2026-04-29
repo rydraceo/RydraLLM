@@ -164,12 +164,14 @@ async function createBooking(params: {
   });
  
   if (!customer) {
-    const [newCustomer] = await db.insert(customers).values({
-      user_id: crypto.randomUUID(),  // Generate UUID for user_id
-      venue_id: params.venue_id,
-      name: params.customer_name,
-      phone: params.customer_phone,
-    }).returning();
+    const userId = crypto.randomUUID();
+const [newCustomer] = await db.insert(customers).values({
+  user_id: userId,
+  business_id: params.venue_id,  // ← ADD THIS
+  venue_id: params.venue_id,
+  name: params.customer_name,
+  phone: params.customer_phone,
+}).returning();
     customer = newCustomer;
   }
  
