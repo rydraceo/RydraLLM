@@ -56,4 +56,22 @@ export const promoCodes = pgTable('promo_codes', {
   expires_at: timestamp('expires_at'),
   used: boolean('used').default(false),
   created_at: timestamp('created_at').defaultNow(),
-}); 
+});
+ 
+export const bookings = pgTable('bookings', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  customer_id: uuid('customer_id').notNull(),
+  venue_id: uuid('venue_id').notNull(),
+  service_id: uuid('service_id'),
+  slot_time: timestamp('slot_time').notNull(),
+  status: text('status').default('pending'),
+  created_at: timestamp('created_at').defaultNow(),
+});
+ 
+export const availableSlots = pgTable('available_slots', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  venue_id: uuid('venue_id').notNull(),
+  slot_time: timestamp('slot_time').notNull(),
+  is_available: boolean('is_available').default(true),
+  created_at: timestamp('created_at').defaultNow(),
+});
