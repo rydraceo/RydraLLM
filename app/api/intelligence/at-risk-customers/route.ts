@@ -2,7 +2,8 @@
  
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { sql } from 'drizzle-orm';
+import { customers, customer_scores } from '@/lib/db/schema';
+import { eq, desc, sql } from 'drizzle-orm';
  
 export async function GET(request: NextRequest) {
   try {
@@ -13,29 +14,28 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'venue_id required' }, { status: 400 });
     }
  
-    const query = sql`
-      SELECT 
-        c.name,
-        c.phone,
-        c.email,
-        c.current_state,
-        EXTRACT(DAY FROM NOW() - c.last_order_date)::INTEGER as days_since_last_visit,
-        c.total_visits,
-        c.gap_ratio,
-        COALESCE(cs.clv_cents, 0) as potential_revenue_cents,
-        cs.churn_score_10
-      FROM customers c
-      INNER JOIN customer_scores cs ON c.user_id = cs.user_id
-      WHERE cs.venue_id = ${venue_id}
-      ORDER BY c.gap_ratio DESC NULLS LAST
-      LIMIT 100
-    `;
+    // Query using Drizzle query builder
+    const results = await db
+      .select({
+        name: customers.name,
+        phone: customers.phone,
+        email: customers.email,
+        current_state: customers.current_state,
+        days_since_last_visit: sql<number>`EXTRACT(DAY FROM NOW() - ${customers.last_order_date})::INTEGER`,
+        total_visits: customers.total_orders,
+        gap_ratio: customers.gap_ratio,
+        potential_revenue_cents: sql<number>`COALESCE(${customer_scores.clv_cents}, 0)`,
+        churn_score_10: customer_scores.churn_score_10,
+      })
+      .from(customers)
+      .innerJoin(customer_scores, eq(customers.user_id, customer_scores.user_id))
+      .where(eq(customer_scores.venue_id, venue_id))
+      .orderBy(desc(customers.gap_ratio))
+      .limit(100);
  
-    const results = await db.execute(query);
-    
     return NextResponse.json({ 
-  customers: results || []
-});
+      customers: results
+    });
     
   } catch (error) {
     console.error('At-risk customers error:', error);
