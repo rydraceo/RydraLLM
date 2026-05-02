@@ -1,4 +1,5 @@
 // lib/interventions/auto-triggers.ts
+// FIXED: Removed duplicate user_id field and fixed type conversions
  
 import { generatePersonalizedIntervention } from '@/lib/markov/predictions.enhanced';
 import { sendSMS } from '@/lib/sms/clicksend-service';
@@ -20,7 +21,7 @@ export async function autoTriggerInterventions(venueId: string) {
     .where(
       and(
         eq(customer_scores.venue_id, venueId),
-        gte(customer_scores.churn_score_10, 0.35), // ← FIXED: number instead of string
+        gte(customer_scores.churn_score_10, 0.35), // ✅ Works with real()
         gte(
           customer_scores.days_since_last_visit,
           sql`${customer_scores.avg_visit_gap_days} * 0.85` // Hit trigger point
@@ -40,11 +41,11 @@ export async function autoTriggerInterventions(venueId: string) {
       // Generate personalized intervention
       const intervention = generatePersonalizedIntervention(
         score.current_state as any,
-        parseFloat(score.churn_score_10 as any) || 0.5,
-        parseFloat(score.loyalty_score as any) || 0.5,
-        parseFloat(score.gap_ratio as any),
-        score.days_since_last_visit || 0,
-        score.clv_cents || 5000,
+        (score.churn_score_10 ?? 0.5) as number,
+        (score.loyalty_score ?? 0.5) as number,
+        (score.gap_ratio ?? 0) as number,
+        score.days_since_last_visit ?? 0,
+        score.clv_cents ?? 5000,
         customer.name || 'Valued Customer',
         undefined
       );
@@ -64,11 +65,10 @@ export async function autoTriggerInterventions(venueId: string) {
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 7);
  
-      // ← FIXED: Match schema fields
+      // ✅ FIXED: Only customer_id, NOT user_id
       await db.insert(promoCodes).values({
         code: promoCode,
         customer_id: score.user_id,
-        user_id: score.user_id,
         venue_id: venueId,
         discount_cents: discountAmount,
         expires_at: expiresAt,
