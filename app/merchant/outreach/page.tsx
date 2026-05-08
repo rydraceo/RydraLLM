@@ -1,10 +1,11 @@
 "use client";
 import { useState, useEffect } from "react";
  
-const BG  = "bg-[#050810]";
-const CARD = "bg-[#0C1120]";
-const BDR  = "border-[#162038]";
-const BDR2 = "border-[#1E2D4E]";
+const BG   = "bg-[#050810]";
+const CARD  = "bg-[#0C1120]";
+const BDR   = "border-[#162038]";
+const BDR2  = "border-[#1E2D4E]";
+ 
 const NAV = [
   { href: "/merchant/dashboard", label: "Dashboard" },
   { href: "/merchant/outreach",  label: "Outreach", active: true },
@@ -14,31 +15,249 @@ const NAV = [
 ];
  
 const STATE_META: Record<string, { label: string; hex: string }> = {
-  C:          { label: "First Timer", hex: "#38BDF8" },
-  X:          { label: "Churned",     hex: "#F43F5E" },
-  R_at_risk:  { label: "At Risk",     hex: "#FB923C" },
-  R_on_fence: { label: "On Fence",    hex: "#FBBF24" },
-  R_loyal:    { label: "Loyal",       hex: "#34D399" },
+  C:          { label: "First Timers", hex: "#38BDF8" },
+  X:          { label: "Churned",      hex: "#F43F5E" },
+  R_at_risk:  { label: "At Risk",      hex: "#FB923C" },
+  R_on_fence: { label: "On Fence",     hex: "#FBBF24" },
+  R_loyal:    { label: "Loyal",        hex: "#34D399" },
 };
  
-interface Message {
+const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+ 
+interface SmsLog {
   id: string; customer_name: string; customer_phone: string;
   message: string; status: string; markov_state: string;
   gap_ratio: number; days_overdue: number; message_cost: string;
   created_at: string; customer_id: string;
 }
  
-export default function OutreachHistoryPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
+interface Rule {
+  id: string; name: string; description: string;
+  target_states: string[]; min_clv_cents: number;
+  min_days_overdue: number; max_days_overdue: number;
+  min_gap_ratio: number; cooldown_days: number; max_sends_per_run: number;
+  message_template: string; send_time: string; send_days: string[];
+  is_active: boolean; is_paused: boolean;
+  total_sent: number; total_rebooked: number; last_run_at: string | null;
+  stats_7d?: { sent: number; rebooked: number; conversion_rate: number };
+}
+ 
+const EMPTY_RULE: Partial<Rule> = {
+  name: "", description: "", target_states: [],
+  min_clv_cents: 0, min_days_overdue: 0, max_days_overdue: 9999,
+  min_gap_ratio: 0, cooldown_days: 21, max_sends_per_run: 50,
+  message_template: "", send_time: "10:00",
+  send_days: ["Monday","Tuesday","Wednesday","Thursday","Friday"],
+  is_active: true,
+};
+ 
+// ─── Rule Builder Modal ───────────────────────────────────────────────────────
+function RuleBuilder({ rule, onClose, onSaved, venueId }: {
+  rule: Rule | null; onClose: () => void; onSaved: () => void; venueId: string;
+}) {
+  const [form, setForm] = useState<Partial<Rule>>(rule ? { ...rule } : EMPTY_RULE);
+  const [saving, setSaving] = useState(false);
+  const [genLoading, setGenLoading] = useState(false);
+  const charCount = (form.message_template || "").length;
+ 
+  function toggleState(s: string) {
+    setForm(f => {
+      const cur = f.target_states || [];
+      return { ...f, target_states: cur.includes(s) ? cur.filter(x => x !== s) : [...cur, s] };
+    });
+  }
+ 
+  function toggleDay(d: string) {
+    setForm(f => {
+      const cur = f.send_days || [];
+      return { ...f, send_days: cur.includes(d) ? cur.filter(x => x !== d) : [...cur, d] };
+    });
+  }
+ 
+  async function generateTemplate() {
+    if (!(form.target_states || []).length) return;
+    setGenLoading(true);
+    try {
+      const res = await fetch("/api/ai/campaign", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          segment: (form.target_states || []).map(s => STATE_META[s]?.label || s).join(", "),
+          markov_state: (form.target_states || [])[0],
+          audience_size: 50,
+          avg_clv: Math.round((form.min_clv_cents || 5000) / 100),
+          avg_days_overdue: form.min_days_overdue || 30,
+          campaign_goal: form.name || "Re-engage and rebook",
+        }),
+      });
+      const data = await res.json();
+      setForm(f => ({ ...f, message_template: data.message || f.message_template }));
+    } catch {} finally { setGenLoading(false); }
+  }
+ 
+  async function save() {
+    if (!form.name || !form.message_template || !(form.target_states || []).length) return;
+    setSaving(true);
+    try {
+      const url = rule ? `/api/automation/rules/${rule.id}` : "/api/automation/rules";
+      const method = rule ? "PUT" : "POST";
+      const res = await fetch(url, {
+        method, headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, venue_id: venueId }),
+      });
+      if (res.ok) { onSaved(); onClose(); }
+    } catch {} finally { setSaving(false); }
+  }
+ 
+  const isValid = !!(form.name && form.message_template && (form.target_states || []).length);
+ 
+  const CONDITION_FIELDS: { label: string; field: keyof Rule; divisor?: number; placeholder: string }[] = [
+    { label: "Min CLV ($)", field: "min_clv_cents", divisor: 100, placeholder: "0" },
+    { label: "Cooldown (days)", field: "cooldown_days", placeholder: "21" },
+    { label: "Min Days Overdue", field: "min_days_overdue", placeholder: "0" },
+    { label: "Max Days Overdue", field: "max_days_overdue", placeholder: "9999" },
+    { label: "Min Gap Ratio (×)", field: "min_gap_ratio", placeholder: "0" },
+    { label: "Max sends per run", field: "max_sends_per_run", placeholder: "50" },
+  ];
+ 
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-40" onClick={onClose} />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+        <div className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-xl border shadow-2xl overflow-hidden" style={{ background: "#05080F", borderColor: "#1E2D4E" }}>
+          <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0" style={{ borderColor: "#162038" }}>
+            <div>
+              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-0.5">{rule ? "Edit Rule" : "New Automation Rule"}</div>
+              <div className="text-sm font-semibold text-white">Configure trigger conditions + message + schedule</div>
+            </div>
+            <button onClick={onClose} className="w-7 h-7 rounded-md border flex items-center justify-center text-slate-500 hover:text-white transition-all" style={{ background: "#090D1A", borderColor: "#162038" }}>
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+ 
+          <div className="flex-1 overflow-y-auto p-6 space-y-5">
+            {/* Name */}
+            <div>
+              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-2">Rule Name</div>
+              <input value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. At Risk Recovery"
+                className="w-full rounded-md px-4 py-2.5 text-sm text-white placeholder-slate-600 border focus:outline-none" style={{ background: "#090D1A", borderColor: "#162038" }} />
+            </div>
+ 
+            {/* States */}
+            <div>
+              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-2">Target Markov States</div>
+              <div className="flex gap-2 flex-wrap">
+                {Object.entries(STATE_META).map(([key, { label, hex }]) => {
+                  const active = (form.target_states || []).includes(key);
+                  return (
+                    <button key={key} onClick={() => toggleState(key)} className="px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all border"
+                      style={{ background: active ? `${hex}18` : "#090D1A", borderColor: active ? `${hex}40` : "#162038", color: active ? hex : "#64748B" }}>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+ 
+            {/* Conditions */}
+            <div>
+              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-2">Trigger Conditions</div>
+              <div className="grid grid-cols-2 gap-3">
+                {CONDITION_FIELDS.map(({ label, field, divisor, placeholder }) => {
+                  const rawVal = (form[field] as number) || 0;
+                  const displayVal = divisor ? rawVal / divisor : rawVal;
+                  return (
+                    <div key={field}>
+                      <div className="text-[9px] text-slate-600 mb-1">{label}</div>
+                      <input type="number" placeholder={placeholder} value={displayVal || ""}
+                        onChange={e => {
+                          const n = e.target.value === "" ? 0 : Number(e.target.value);
+                          setForm(f => ({ ...f, [field]: divisor ? Math.round(n * divisor) : n }));
+                        }}
+                        className="w-full rounded-md px-3 py-2 text-sm text-white border focus:outline-none" style={{ background: "#090D1A", borderColor: "#162038" }} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+ 
+            {/* Message */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Message Template</div>
+                <span className={`text-[9px] font-mono ${charCount > 160 ? "text-rose-400" : "text-slate-600"}`}>{charCount}/160</span>
+              </div>
+              <textarea value={form.message_template || ""} onChange={e => setForm(f => ({ ...f, message_template: e.target.value }))} rows={3}
+                placeholder="Hey [NAME], the team at Alkami — it's been a while. Reply YES to book with [BARBER] this week."
+                className="w-full rounded-md px-4 py-3 text-sm text-white placeholder-slate-600 border focus:outline-none resize-none leading-relaxed" style={{ background: "#090D1A", borderColor: "#162038" }} />
+              <div className="h-0.5 rounded-full mt-1.5 mb-2" style={{ background: "#162038" }}>
+                <div className="h-full rounded-full transition-all" style={{ width: `${Math.min((charCount / 160) * 100, 100)}%`, background: charCount > 160 ? "#F43F5E" : "#6366F1" }} />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-slate-700">Use [NAME] and [BARBER] · AI personalises each individual send</span>
+                <button onClick={generateTemplate} disabled={genLoading || !(form.target_states || []).length}
+                  className="ml-auto px-3 py-1.5 rounded-md text-[9px] font-bold uppercase tracking-wider disabled:opacity-40 border flex items-center gap-1.5 transition-all"
+                  style={{ background: "#090D1A", borderColor: "#162038", color: "#64748B" }}>
+                  {genLoading ? <><div className="w-2.5 h-2.5 border border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin" />Generating...</> : "✦ Generate with AI"}
+                </button>
+              </div>
+            </div>
+ 
+            {/* Schedule */}
+            <div>
+              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-2">Schedule</div>
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                  <div className="text-[9px] text-slate-600 mb-1">Send Time (AEST)</div>
+                  <input type="time" value={form.send_time || "10:00"} onChange={e => setForm(f => ({ ...f, send_time: e.target.value }))}
+                    className="w-full rounded-md px-3 py-2 text-sm text-white border focus:outline-none" style={{ background: "#090D1A", borderColor: "#162038" }} />
+                </div>
+                <div>
+                  <div className="text-[9px] text-slate-600 mb-1">Status</div>
+                  <button onClick={() => setForm(f => ({ ...f, is_active: !f.is_active }))}
+                    className="w-full py-2 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all border"
+                    style={{ background: form.is_active ? "rgba(52,211,153,0.08)" : "#090D1A", borderColor: form.is_active ? "rgba(52,211,153,0.3)" : "#162038", color: form.is_active ? "#34D399" : "#64748B" }}>
+                    {form.is_active ? "Active" : "Inactive"}
+                  </button>
+                </div>
+              </div>
+              <div className="text-[9px] text-slate-600 mb-1.5">Send Days</div>
+              <div className="flex gap-1.5 flex-wrap">
+                {DAYS.map(day => {
+                  const active = (form.send_days || []).includes(day);
+                  return (
+                    <button key={day} onClick={() => toggleDay(day)} className="px-2.5 py-1.5 rounded-md text-[9px] font-bold uppercase tracking-wider transition-all border"
+                      style={{ background: active ? "rgba(99,102,241,0.15)" : "#090D1A", borderColor: active ? "rgba(99,102,241,0.4)" : "#162038", color: active ? "#818CF8" : "#475569" }}>
+                      {day.slice(0, 3)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+ 
+          <div className="flex-shrink-0 border-t px-6 py-4 flex gap-3" style={{ background: "#090D1A", borderColor: "#162038" }}>
+            <button onClick={onClose} className="flex-1 py-2.5 rounded-md border text-slate-400 text-sm font-medium hover:text-white transition-all" style={{ borderColor: "#162038" }}>Cancel</button>
+            <button onClick={save} disabled={saving || !isValid} className="flex-[2] py-2.5 rounded-md text-sm font-semibold text-white disabled:opacity-40 transition-all" style={{ background: "#4F46E5" }}>
+              {saving ? "Saving..." : rule ? "Save Changes" : "Create Rule"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+ 
+// ─── History Tab ──────────────────────────────────────────────────────────────
+function HistoryTab({ venueId }: { venueId: string }) {
+  const [messages, setMessages] = useState<SmsLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [stateFilter, setStateFilter] = useState("all");
   const [expanded, setExpanded] = useState<string | null>(null);
-  const VENUE_ID = process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID || "e1a6c15d-8ccc-4f58-aefb-8bea46e39918";
  
   useEffect(() => {
-    fetch(`/api/outreach/history?venue_id=${VENUE_ID}`)
+    fetch(`/api/outreach/history?venue_id=${venueId}`)
       .then(r => r.json()).then(d => setMessages(d.messages || [])).catch(console.error).finally(() => setLoading(false));
   }, []);
  
@@ -53,130 +272,452 @@ export default function OutreachHistoryPage() {
   const delivered = messages.filter(m => ["delivered","queued","sent"].includes(m.status)).length;
   const failed = messages.filter(m => m.status === "failed").length;
  
-  if (loading) return <div className={`min-h-screen ${BG} flex items-center justify-center`}><div className="text-center"><div className="w-10 h-10 border border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin mx-auto mb-3" /><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Loading outreach</div></div></div>;
+  if (loading) return (
+    <div className="flex items-center justify-center py-20">
+      <div className="w-8 h-8 border border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+    </div>
+  );
+ 
+  return (
+    <div>
+      {/* Stats */}
+      <div className="grid grid-cols-4 gap-4 mb-6">
+        {[
+          { l: "Total Sent",     v: messages.length.toLocaleString(), acc: "#6366F1" },
+          { l: "Delivered",      v: delivered.toLocaleString(),        acc: "#34D399" },
+          { l: "Failed",         v: failed.toLocaleString(),           acc: failed > 0 ? "#F43F5E" : "#162038" },
+          { l: "Total Spend",    v: `$${totalCost.toFixed(2)}`,        acc: "#FBBF24" },
+        ].map(({ l, v, acc }) => (
+          <div key={l} className={`${CARD} border ${BDR} rounded-xl p-5 relative overflow-hidden`}>
+            <div className="absolute left-0 top-3 bottom-3 w-[2px] rounded-r-full" style={{ background: acc }} />
+            <div className="pl-3">
+              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-2">{l}</div>
+              <div className="text-3xl font-bold tracking-tight text-white">{v}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+ 
+      {/* Filters */}
+      <div className="flex gap-3 mb-4 flex-wrap">
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or phone..."
+          className="flex-1 min-w-48 rounded-md px-4 py-2 text-sm text-white placeholder-slate-600 border focus:border-indigo-500/40 focus:outline-none transition-all" style={{ background: "#090D1A", borderColor: "#162038" }} />
+        <div className="flex gap-1">
+          {[["all","All"],["delivered","Delivered"],["queued","Queued"],["failed","Failed"]].map(([v, l]) => (
+            <button key={v} onClick={() => setStatusFilter(v)}
+              className={`px-3 py-2 rounded-md text-[9px] font-bold uppercase tracking-wider transition-all border ${statusFilter === v ? "bg-indigo-600 border-indigo-600 text-white" : "text-slate-500"}`}
+              style={statusFilter !== v ? { background: "#090D1A", borderColor: "#162038" } : {}}>{l}</button>
+          ))}
+        </div>
+        <div className="flex gap-1">
+          {[["all","All States"],["X","Churned"],["R_at_risk","At Risk"],["R_on_fence","On Fence"],["C","First Timer"],["R_loyal","Loyal"]].map(([v, l]) => (
+            <button key={v} onClick={() => setStateFilter(v)}
+              className={`px-3 py-2 rounded-md text-[9px] font-bold uppercase tracking-wider transition-all border ${stateFilter === v ? "bg-indigo-600 border-indigo-600 text-white" : "text-slate-500"}`}
+              style={stateFilter !== v ? { background: "#090D1A", borderColor: "#162038" } : {}}>{l}</button>
+          ))}
+        </div>
+      </div>
+ 
+      <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-3">{filtered.length.toLocaleString()} messages</div>
+ 
+      <div className={`${CARD} border ${BDR} rounded-xl overflow-hidden`}>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-[#0F1829]" style={{ background: "#090D1A" }}>
+                {["Client","State","Status","Gap","Overdue","Cost","Sent",""].map((h, i) => (
+                  <th key={h + i} className={`px-5 py-3 text-[9px] font-bold uppercase tracking-widest text-slate-600 ${i > 1 ? "text-right" : "text-left"}`}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(m => {
+                const sm = STATE_META[m.markov_state] || { label: m.markov_state || "—", hex: "#6366F1" };
+                const ok = ["delivered","queued","sent"].includes(m.status);
+                const isExp = expanded === m.id;
+                return (
+                  <>
+                    <tr key={m.id} onClick={() => setExpanded(isExp ? null : m.id)}
+                      className="border-b border-[#0A0F1C] hover:bg-white/[0.02] cursor-pointer transition-colors">
+                      <td className="px-5 py-3.5">
+                        <div className="text-sm font-medium text-white">{m.customer_name || "Unknown"}</div>
+                        <div className="text-[10px] text-slate-600">{m.customer_phone || "—"}</div>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-1.5 h-1.5 rounded-full" style={{ background: sm.hex }} />
+                          <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: sm.hex }}>{sm.label}</span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <div className="w-1.5 h-1.5 rounded-full" style={{ background: ok ? "#34D399" : "#F43F5E" }} />
+                          <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: ok ? "#34D399" : "#F43F5E" }}>{m.status}</span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5 text-right text-sm" style={{ color: m.gap_ratio > 1.5 ? "#F43F5E" : m.gap_ratio > 1 ? "#FB923C" : "#34D399" }}>
+                        {m.gap_ratio?.toFixed(2) || "—"}×
+                      </td>
+                      <td className="px-5 py-3.5 text-right text-sm text-slate-400">{m.days_overdue || 0}<span className="text-[9px] text-slate-700">d</span></td>
+                      <td className="px-5 py-3.5 text-right text-[10px] text-slate-600">${m.message_cost || "0.08"}</td>
+                      <td className="px-5 py-3.5 text-right text-[10px] text-slate-600">
+                        {new Date(m.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "2-digit" })}
+                      </td>
+                      <td className="px-5 py-3.5 text-right text-[10px] text-indigo-400">{isExp ? "▲" : "▼"}</td>
+                    </tr>
+                    {isExp && (
+                      <tr key={m.id + "-exp"} className="border-b border-[#0A0F1C]">
+                        <td colSpan={8} className="px-5 py-4" style={{ background: "#090D1A" }}>
+                          <div className="flex items-start gap-4">
+                            <div className="flex-1">
+                              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-2">Message</div>
+                              <div className="rounded-md px-3 py-2.5 border text-sm text-slate-300 leading-relaxed" style={{ background: "#0C1120", borderColor: "#162038" }}>{m.message}</div>
+                            </div>
+                            {m.customer_id && (
+                              <a href={`/merchant/clients/${m.customer_id}`}
+                                className="flex-shrink-0 px-3.5 py-1.5 rounded-md text-[10px] font-semibold border hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-all"
+                                style={{ background: "#090D1A", borderColor: "#1E2D4E", color: "#818CF8" }}>
+                                View Client →
+                              </a>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {filtered.length === 0 && (
+          <div className="text-center py-12 text-[9px] font-bold uppercase tracking-widest text-slate-700">
+            {messages.length === 0 ? "No messages sent yet" : "No messages match filters"}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+ 
+// ─── Autopilot Tab ────────────────────────────────────────────────────────────
+function AutopilotTab({ venueId }: { venueId: string }) {
+  const [rules, setRules] = useState<Rule[]>([]);
+  const [stats, setStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [showBuilder, setShowBuilder] = useState(false);
+  const [editingRule, setEditingRule] = useState<Rule | null>(null);
+  const [runningRule, setRunningRule] = useState<string | null>(null);
+  const [runResult, setRunResult] = useState<any>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+ 
+  async function load() {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/automation/rules?venue_id=${venueId}`);
+      const data = await res.json();
+      setRules(data.rules || []);
+      setStats(data.stats || null);
+    } catch {} finally { setLoading(false); }
+  }
+ 
+  useEffect(() => { load(); }, []);
+ 
+  async function toggleActive(rule: Rule) {
+    await fetch(`/api/automation/rules/${rule.id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_active: !rule.is_active }),
+    });
+    load();
+  }
+ 
+  async function deleteRule(id: string) {
+    await fetch(`/api/automation/rules/${id}`, { method: "DELETE" });
+    setDeleteConfirm(null);
+    load();
+  }
+ 
+  async function runNow(rule: Rule, dryRun = false) {
+    const key = dryRun ? rule.id + "-dry" : rule.id;
+    setRunningRule(key); setRunResult(null);
+    try {
+      const res = await fetch("/api/cron/interventions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-cron-secret": "rydra-dev" },
+        body: JSON.stringify({ venue_id: venueId, rule_id: rule.id, dry_run: dryRun }),
+      });
+      const data = await res.json();
+      setRunResult({ ...data, is_dry: dryRun });
+      load();
+    } catch {} finally { setRunningRule(null); }
+  }
+ 
+  if (loading) return (
+    <div className="flex items-center justify-center py-20">
+      <div className="w-8 h-8 border border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+    </div>
+  );
+ 
+  return (
+    <div>
+      {showBuilder && (
+        <RuleBuilder rule={editingRule} onClose={() => setShowBuilder(false)} onSaved={load} venueId={venueId} />
+      )}
+ 
+      {/* Stats */}
+      {stats && (
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          {[
+            { l: "Active Rules",       v: stats.active_rules,                                                                      acc: "#6366F1" },
+            { l: "Sent (30d)",         v: stats.sent_30d.toLocaleString(),                                                         acc: "#34D399" },
+            { l: "Rebooked (30d)",     v: stats.rebooked_30d.toLocaleString(),                                                     acc: "#FBBF24" },
+            { l: "Revenue Recovered",  v: `$${(stats.revenue_30d || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`,  acc: "#34D399" },
+          ].map(({ l, v, acc }) => (
+            <div key={l} className={`${CARD} border ${BDR} rounded-xl p-5 relative overflow-hidden`}>
+              <div className="absolute left-0 top-3 bottom-3 w-[2px] rounded-r-full" style={{ background: acc }} />
+              <div className="pl-3">
+                <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-2">{l}</div>
+                <div className="text-3xl font-bold tracking-tight text-white">{v}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+ 
+      {/* Run result */}
+      {runResult && (
+        <div className="rounded-xl border px-5 py-4 mb-5 flex items-start gap-4"
+          style={{ background: runResult.is_dry ? "rgba(99,102,241,0.06)" : "rgba(52,211,153,0.06)", borderColor: runResult.is_dry ? "rgba(99,102,241,0.25)" : "rgba(52,211,153,0.25)" }}>
+          <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 mt-0.5"
+            style={{ background: runResult.is_dry ? "rgba(99,102,241,0.15)" : "rgba(52,211,153,0.15)" }}>
+            {runResult.is_dry
+              ? <svg className="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+              : <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+          </div>
+          <div className="flex-1">
+            <div className={`text-sm font-semibold mb-1 ${runResult.is_dry ? "text-indigo-300" : "text-emerald-300"}`}>
+              {runResult.is_dry ? `Dry Run — ${runResult.total_sent} would be sent` : `Done — ${runResult.total_sent} messages sent`}
+            </div>
+            {(runResult.results || []).map((r: any, i: number) => (
+              <div key={i} className="text-[10px] text-slate-400">
+                <span className="font-medium text-white">{r.rule_name}</span>
+                {" — "}{r.matched} matched · {r.sent} {runResult.is_dry ? "would send" : "sent"}
+                {r.failed > 0 && <span className="text-rose-400 ml-2">{r.failed} failed</span>}
+              </div>
+            ))}
+          </div>
+          <button onClick={() => setRunResult(null)} className="text-slate-600 hover:text-slate-400 flex-shrink-0">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
+ 
+      {/* How it works */}
+      <div className={`${CARD} border ${BDR} rounded-xl p-5 mb-5`}>
+        <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-4">How Autopilot works</div>
+        <div className="grid grid-cols-5 gap-4">
+          {[
+            { n: "1", t: "Nightly check", d: "Runs every night at 9am AEST. Evaluates every client against every active rule." },
+            { n: "2", t: "State matching", d: "Filters by Markov state, CLV, days overdue, and gap ratio." },
+            { n: "3", t: "Cooldown", d: "Skips anyone contacted recently. No client is ever spammed." },
+            { n: "4", t: "AI writes each SMS", d: "GPT-4o-mini writes a unique message per client based on their individual data." },
+            { n: "5", t: "Send + log", d: "Fires via ClickSend. Every send logged with full attribution tracking." },
+          ].map(({ n, t, d }) => (
+            <div key={n} className="flex flex-col gap-2">
+              <div className="w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold text-indigo-400"
+                style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)" }}>{n}</div>
+              <div className="text-xs font-semibold text-white">{t}</div>
+              <div className="text-[10px] text-slate-500 leading-relaxed">{d}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+ 
+      {/* New rule button */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">
+          {rules.length} rule{rules.length !== 1 ? "s" : ""} — fires nightly at 9am AEST
+        </div>
+        <button onClick={() => { setEditingRule(null); setShowBuilder(true); }}
+          className="flex items-center gap-2 px-4 py-1.5 rounded-md text-xs font-semibold text-white transition-all"
+          style={{ background: "#4F46E5" }}>
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+          New Rule
+        </button>
+      </div>
+ 
+      {/* Rules */}
+      {rules.length === 0 ? (
+        <div className={`${CARD} border ${BDR} rounded-xl p-10 text-center`}>
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-3" style={{ background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.18)" }}>
+            <svg className="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+          </div>
+          <div className="text-sm font-semibold text-white mb-1">No rules yet</div>
+          <div className="text-xs text-slate-600 mb-4 max-w-xs mx-auto">Create your first rule and Rydra recovers clients on autopilot every night.</div>
+          <button onClick={() => { setEditingRule(null); setShowBuilder(true); }} className="px-5 py-2.5 rounded-md text-sm font-semibold text-white" style={{ background: "#4F46E5" }}>Create First Rule</button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {rules.map(rule => {
+            const isRunning = runningRule === rule.id || runningRule === rule.id + "-dry";
+            const s7 = rule.stats_7d || { sent: 0, rebooked: 0, conversion_rate: 0 };
+            const convPct = s7.conversion_rate * 100;
+            return (
+              <div key={rule.id} className={`${CARD} border rounded-xl overflow-hidden transition-all`} style={{ borderColor: rule.is_active && !rule.is_paused ? "#1E2D4E" : "#162038" }}>
+                <div className="p-5">
+                  <div className="flex items-start gap-4">
+                    <div className="flex-shrink-0 pt-1.5">
+                      <div className="w-2 h-2 rounded-full" style={{ background: rule.is_active && !rule.is_paused ? "#34D399" : rule.is_paused ? "#FBBF24" : "#162038", boxShadow: rule.is_active && !rule.is_paused ? "0 0 6px rgba(52,211,153,0.5)" : "none" }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-3 mb-1 flex-wrap">
+                        <span className="text-sm font-semibold text-white">{rule.name}</span>
+                        <div className="flex gap-1.5 flex-wrap">
+                          {rule.target_states.map(s => {
+                            const sm = STATE_META[s]; if (!sm) return null;
+                            return <span key={s} className="text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: `${sm.hex}12`, color: sm.hex }}>{sm.label}</span>;
+                          })}
+                        </div>
+                        {!rule.is_active && <span className="text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded text-slate-600" style={{ background: "#162038" }}>Inactive</span>}
+                      </div>
+                      {rule.description && <div className="text-[10px] text-slate-500 mb-3">{rule.description}</div>}
+                      <div className="flex gap-2 flex-wrap mb-3">
+                        {[
+                          rule.min_clv_cents > 0 && `CLV > $${rule.min_clv_cents / 100}`,
+                          rule.min_days_overdue > 0 && `${rule.min_days_overdue}+ days overdue`,
+                          rule.max_days_overdue < 9999 && `max ${rule.max_days_overdue}d`,
+                          `cooldown ${rule.cooldown_days}d`,
+                          `max ${rule.max_sends_per_run}/run`,
+                        ].filter(Boolean).map((tag, i) => (
+                          <span key={i} className="text-[9px] text-slate-600 border px-2 py-0.5 rounded" style={{ background: "#090D1A", borderColor: "#162038" }}>{tag as string}</span>
+                        ))}
+                      </div>
+                      <div className="rounded-md px-3 py-2 border mb-3" style={{ background: "#090D1A", borderColor: "#162038" }}>
+                        <div className="text-[8px] text-slate-700 uppercase tracking-wider mb-1">Template</div>
+                        <p className="text-xs text-slate-400 leading-relaxed">{rule.message_template}</p>
+                      </div>
+                      <div className="flex items-center gap-5 text-[10px]">
+                        <div><span className="text-slate-600">7d sent </span><span className="text-white font-semibold">{s7.sent}</span></div>
+                        <div><span className="text-slate-600">rebooked </span><span className="text-emerald-400 font-semibold">{s7.rebooked}</span></div>
+                        {s7.sent > 0 && <div><span className="text-slate-600">conversion </span><span className="font-semibold" style={{ color: convPct >= 30 ? "#34D399" : convPct >= 15 ? "#FBBF24" : "#F43F5E" }}>{convPct.toFixed(0)}%</span></div>}
+                        <div><span className="text-slate-600">all-time </span><span className="text-white font-semibold">{rule.total_sent}</span></div>
+                        {rule.last_run_at && <div className="text-slate-600">last run {new Date(rule.last_run_at).toLocaleDateString("en-AU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</div>}
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2 flex-shrink-0 min-w-[88px]">
+                      <button onClick={() => toggleActive(rule)} className="px-3 py-1.5 rounded-md text-[9px] font-bold uppercase tracking-wider transition-all border"
+                        style={{ background: rule.is_active ? "rgba(52,211,153,0.06)" : "#090D1A", borderColor: rule.is_active ? "rgba(52,211,153,0.3)" : "#162038", color: rule.is_active ? "#34D399" : "#64748B" }}>
+                        {rule.is_active ? "Active" : "Inactive"}
+                      </button>
+                      <button onClick={() => runNow(rule, false)} disabled={isRunning} className="px-3 py-1.5 rounded-md text-[9px] font-bold uppercase tracking-wider disabled:opacity-40 border flex items-center justify-center gap-1 transition-all"
+                        style={{ background: "#090D1A", borderColor: "#1E2D4E", color: "#818CF8" }}>
+                        {runningRule === rule.id ? <><div className="w-2.5 h-2.5 border border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin" />Running...</> : "Run Now"}
+                      </button>
+                      <button onClick={() => runNow(rule, true)} disabled={isRunning} className="px-3 py-1.5 rounded-md text-[9px] font-bold uppercase tracking-wider disabled:opacity-40 border flex items-center justify-center gap-1 transition-all"
+                        style={{ background: "#090D1A", borderColor: "#162038", color: "#475569" }}>
+                        {runningRule === rule.id + "-dry" ? <><div className="w-2.5 h-2.5 border border-slate-400/30 border-t-slate-400 rounded-full animate-spin" />Simulating...</> : "Dry Run"}
+                      </button>
+                      <button onClick={() => { setEditingRule(rule); setShowBuilder(true); }} className="px-3 py-1.5 rounded-md text-[9px] font-bold uppercase tracking-wider border transition-all"
+                        style={{ background: "#090D1A", borderColor: "#162038", color: "#475569" }}>Edit</button>
+                      {deleteConfirm === rule.id ? (
+                        <div className="flex gap-1">
+                          <button onClick={() => deleteRule(rule.id)} className="flex-1 px-2 py-1 rounded-md text-[8px] font-bold uppercase border transition-all"
+                            style={{ background: "#090D1A", borderColor: "rgba(244,63,94,0.3)", color: "#F43F5E" }}>Confirm</button>
+                          <button onClick={() => setDeleteConfirm(null)} className="px-2 py-1 rounded-md text-[8px] border"
+                            style={{ background: "#090D1A", borderColor: "#162038", color: "#64748B" }}>✕</button>
+                        </div>
+                      ) : (
+                        <button onClick={() => setDeleteConfirm(rule.id)} className="px-3 py-1.5 rounded-md text-[9px] font-bold uppercase tracking-wider border transition-all"
+                          style={{ background: "#090D1A", borderColor: "#162038", color: "#475569" }}>Delete</button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex border-t px-5 py-2 gap-1" style={{ background: "#090D1A", borderColor: "#0F1529" }}>
+                  {DAYS.map(day => {
+                    const active = rule.send_days.includes(day);
+                    return (
+                      <div key={day} className="flex-1 text-center text-[8px] font-bold uppercase py-1 rounded"
+                        style={{ background: active ? "rgba(99,102,241,0.12)" : "transparent", color: active ? "#818CF8" : "#334155" }}>
+                        {day.slice(0, 1)}
+                      </div>
+                    );
+                  })}
+                  <div className="ml-3 text-[9px] text-slate-700 flex items-center whitespace-nowrap">{rule.send_time} AEST</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+ 
+      {/* Cron reminder */}
+      <div className={`mt-5 ${CARD} border ${BDR} rounded-xl p-4`}>
+        <div className="flex items-start gap-3">
+          <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.2)" }}>
+            <svg className="w-3 h-3 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          </div>
+          <div>
+            <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-1">Vercel Cron</div>
+            <div className="text-[10px] text-slate-500 mb-1.5">Add to <code className="text-indigo-400 text-[9px]">vercel.json</code> to enable nightly runs:</div>
+            <div className="rounded px-3 py-2 border font-mono text-[10px] text-emerald-400" style={{ background: "#090D1A", borderColor: "#162038" }}>
+              {'"crons": [{ "path": "/api/cron/interventions", "schedule": "0 23 * * *" }]'}
+            </div>
+            <div className="text-[9px] text-slate-700 mt-1">23:00 UTC = 9am AEST · Set <code className="text-amber-400 text-[9px]">CRON_SECRET</code> in Vercel env vars</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+ 
+// ─── Main Page ────────────────────────────────────────────────────────────────
+export default function OutreachPage() {
+  const [tab, setTab] = useState<"history" | "autopilot">("history");
+  const VENUE_ID = process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID || "e1a6c15d-8ccc-4f58-aefb-8bea46e39918";
  
   return (
     <div className={`min-h-screen ${BG} text-white pb-16`}>
+      {/* Nav */}
       <div className="border-b border-[#0F1829] backdrop-blur-xl sticky top-0 z-30" style={{ background: "rgba(5,8,16,0.96)" }}>
         <div className="max-w-[1600px] mx-auto px-8 h-14 flex items-center gap-6">
           <div className="flex items-center gap-3 flex-shrink-0">
-            <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center"><svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg></div>
-            <div><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Rydra</div><div className="text-sm font-semibold text-white leading-none">Outreach History</div></div>
+            <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
+              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
+            </div>
+            <div>
+              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Rydra</div>
+              <div className="text-sm font-semibold text-white leading-none">Outreach</div>
+            </div>
           </div>
           <nav className="flex items-center gap-1">
-            {NAV.map(tab => <a key={tab.href} href={tab.href} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${(tab as any).active ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white hover:bg-white/[0.05]"}`}>{tab.label}</a>)}
+            {NAV.map(t => (
+              <a key={t.href} href={t.href} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${(t as any).active ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white hover:bg-white/[0.05]"}`}>{t.label}</a>
+            ))}
           </nav>
         </div>
       </div>
  
       <div className="max-w-[1600px] mx-auto px-8 py-8">
-        <div className="mb-8">
+        <div className="mb-6">
           <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-1">Alkami Barbershop · Canberra</div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">SMS Outreach History</h1>
+          <h1 className="text-2xl font-bold text-white tracking-tight">Outreach</h1>
         </div>
  
-        {/* KPIs */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
-          {[
-            { l: "Total Sent",    v: messages.length, acc: "#6366F1" },
-            { l: "Delivered",     v: delivered,         acc: "#34D399" },
-            { l: "Failed",        v: failed,            acc: failed > 0 ? "#F43F5E" : "#162038" },
-            { l: "Total Spend",   v: `$${totalCost.toFixed(2)}`, acc: "#FBBF24" },
-          ].map(({ l, v, acc }) => (
-            <div key={l} className={`${CARD} border ${BDR} rounded-xl p-5 relative overflow-hidden`}>
-              <div className="absolute left-0 top-3 bottom-3 w-[2px] rounded-r-full" style={{ background: acc }} />
-              <div className="pl-3"><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-2">{l}</div><div className="text-3xl font-bold tracking-tight text-white">{v}</div></div>
-            </div>
-          ))}
+        {/* Sub-tabs */}
+        <div className="flex gap-1 mb-6 border-b border-[#162038]">
+          <button onClick={() => setTab("history")}
+            className={`px-5 py-2.5 text-xs font-semibold uppercase tracking-wider transition-all border-b-2 -mb-px ${tab === "history" ? "border-indigo-500 text-indigo-400" : "border-transparent text-slate-600 hover:text-slate-300"}`}>
+            History
+          </button>
+          <button onClick={() => setTab("autopilot")}
+            className={`px-5 py-2.5 text-xs font-semibold uppercase tracking-wider transition-all border-b-2 -mb-px flex items-center gap-2 ${tab === "autopilot" ? "border-indigo-500 text-indigo-400" : "border-transparent text-slate-600 hover:text-slate-300"}`}>
+            Autopilot
+            <span className="text-[8px] px-1.5 py-0.5 rounded font-bold" style={{ background: "rgba(99,102,241,0.15)", color: "#818CF8" }}>AUTO</span>
+          </button>
         </div>
  
-        {/* Filters */}
-        <div className="flex gap-3 mb-4 flex-wrap">
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or phone..."
-            className="flex-1 min-w-48 rounded-md px-4 py-2 text-sm text-white placeholder-slate-600 border border-[#162038] hover:border-[#1E2D4E] focus:border-indigo-500/40 focus:outline-none transition-all" style={{ background: "#090D1A" }} />
-          <div className="flex gap-1">
-            {[["all","All Status"],["delivered","Delivered"],["queued","Queued"],["failed","Failed"]].map(([v,l]) => (
-              <button key={v} onClick={() => setStatusFilter(v)}
-                className={`px-3 py-2 rounded-md text-[10px] font-semibold uppercase tracking-wider transition-all ${statusFilter === v ? "bg-indigo-600 text-white" : "border border-[#162038] text-slate-500 hover:text-slate-200"}`}
-                style={statusFilter !== v ? { background: "#090D1A" } : {}}>{l}</button>
-            ))}
-          </div>
-          <div className="flex gap-1">
-            {[["all","All States"],["X","Churned"],["R_at_risk","At Risk"],["R_on_fence","On Fence"],["C","First Timer"],["R_loyal","Loyal"]].map(([v,l]) => (
-              <button key={v} onClick={() => setStateFilter(v)}
-                className={`px-3 py-2 rounded-md text-[10px] font-semibold uppercase tracking-wider transition-all ${stateFilter === v ? "bg-indigo-600 text-white" : "border border-[#162038] text-slate-500 hover:text-slate-200"}`}
-                style={stateFilter !== v ? { background: "#090D1A" } : {}}>{l}</button>
-            ))}
-          </div>
-        </div>
- 
-        <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-4">{filtered.length.toLocaleString()} messages</div>
- 
-        {/* Table */}
-        <div className={`${CARD} border ${BDR} rounded-xl overflow-hidden`}>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-[#0F1829]" style={{ background: "#090D1A" }}>
-                  {["Client","State","Status","Gap","Overdue","Cost","Sent","Message"].map((h,i) => (
-                    <th key={h} className={`px-5 py-3 text-[9px] font-bold uppercase tracking-widest text-slate-600 ${i > 1 ? "text-right" : "text-left"}`}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(m => {
-                  const sm = STATE_META[m.markov_state] || { label: m.markov_state || "—", hex: "#6366F1" };
-                  const isDelivered = ["delivered","queued","sent"].includes(m.status);
-                  const isExp = expanded === m.id;
-                  return (
-                    <>
-                      <tr key={m.id} onClick={() => setExpanded(isExp ? null : m.id)}
-                        className="border-b border-[#0A0F1C] hover:bg-white/[0.02] cursor-pointer transition-colors">
-                        <td className="px-5 py-3.5">
-                          <div className="text-sm font-medium text-white">{m.customer_name || "Unknown"}</div>
-                          <div className="text-[10px] text-slate-600">{m.customer_phone || "—"}</div>
-                        </td>
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center gap-1.5">
-                            <div className="w-1.5 h-1.5 rounded-full" style={{ background: sm.hex }} />
-                            <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: sm.hex }}>{sm.label}</span>
-                          </div>
-                        </td>
-                        <td className="px-5 py-3.5 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <div className="w-1.5 h-1.5 rounded-full" style={{ background: isDelivered ? "#34D399" : "#F43F5E" }} />
-                            <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: isDelivered ? "#34D399" : "#F43F5E" }}>{m.status}</span>
-                          </div>
-                        </td>
-                        <td className="px-5 py-3.5 text-right text-sm" style={{ color: m.gap_ratio > 1.5 ? "#F43F5E" : m.gap_ratio > 1 ? "#FB923C" : "#34D399" }}>{m.gap_ratio?.toFixed(2) || "—"}×</td>
-                        <td className="px-5 py-3.5 text-right text-sm text-slate-400">{m.days_overdue || 0}<span className="text-[9px] text-slate-700">d</span></td>
-                        <td className="px-5 py-3.5 text-right text-[10px] text-slate-600">${m.message_cost || "0.08"}</td>
-                        <td className="px-5 py-3.5 text-right text-[10px] text-slate-600">{new Date(m.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "2-digit" })}</td>
-                        <td className="px-5 py-3.5 text-right">
-                          <span className="text-[10px] text-indigo-400">{isExp ? "Hide ↑" : "Show ↓"}</span>
-                        </td>
-                      </tr>
-                      {isExp && (
-                        <tr key={`${m.id}-exp`} className="border-b border-[#0A0F1C]">
-                          <td colSpan={8} className="px-5 py-4" style={{ background: "#090D1A" }}>
-                            <div className="flex items-start gap-4">
-                              <div className="flex-1">
-                                <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-2">Message</div>
-                                <div className="rounded-lg p-3 border border-[#162038] text-sm text-slate-300 leading-relaxed" style={{ background: "#0C1120" }}>{m.message}</div>
-                              </div>
-                              <a href={`/merchant/clients/${m.customer_id}`} className="flex-shrink-0 px-3.5 py-1.5 rounded-md text-[10px] font-semibold text-indigo-400 border border-[#1E2D4E] hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-all" style={{ background: "#090D1A" }}>View Client →</a>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          {filtered.length === 0 && <div className="text-center py-12 text-[9px] font-bold uppercase tracking-widest text-slate-700">{messages.length === 0 ? "No messages sent yet" : "No messages match filters"}</div>}
-        </div>
+        {tab === "history" ? <HistoryTab venueId={VENUE_ID} /> : <AutopilotTab venueId={VENUE_ID} />}
       </div>
     </div>
   );
