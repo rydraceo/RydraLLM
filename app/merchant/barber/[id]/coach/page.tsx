@@ -2,11 +2,11 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
  
-const BG   = "bg-[#050810]";
-const CARD  = "bg-[#0C1120]";
-const CARD2 = "bg-[#0F1529]";
-const BDR   = "border-[#162038]";
-const BDR2  = "border-[#1E2D4E]";
+const BG   = "bg-[#0A0612]";
+const CARD  = "bg-[#130C24]";
+const CARD2 = "bg-[#1A1030]";
+const BDR   = "border-[#2A1852]";
+const BDR2  = "border-[#3A2268]";
  
 interface CoachMsg { role: "user"|"assistant"; content: string; type?: string; }
  
@@ -92,10 +92,10 @@ export default function RydraCoachPage() {
   return (
     <div className={`min-h-screen ${BG} text-white pb-16`}>
       {/* Nav */}
-      <div className="border-b border-[#0F1829] backdrop-blur-xl sticky top-0 z-30" style={{ background: "rgba(5,8,16,0.96)" }}>
+      <div className="border-b border-[#0F1829] backdrop-blur-xl sticky top-0 z-30" style={{ background: "rgba(10,6,18,0.97)" }}>
         <div className="max-w-[1200px] mx-auto px-8 h-14 flex items-center gap-6">
           <div className="flex items-center gap-3 flex-shrink-0">
-            <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center"><svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" /></svg></div>
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg, #5B21B6 0%, #D4A017 100%)" }}><svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" /></svg></div>
             <div><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Rydra</div><div className="text-sm font-semibold text-white leading-none">RydraCoach</div></div>
           </div>
           <nav className="flex items-center gap-1">
@@ -118,7 +118,7 @@ export default function RydraCoachPage() {
         {/* Profile + stats */}
         {barber && (
           <div className={`${CARD} border ${BDR} rounded-xl p-5 mb-6 flex items-center gap-5`}>
-            <div className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-base flex-shrink-0" style={{ background: `linear-gradient(135deg, ${barber.color_from || "#4F46E5"}, ${barber.color_to || "#7C3AED"})` }}>
+            <div className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-base flex-shrink-0" style={{ background: `linear-gradient(135deg, ${barber.color_from || "#5B21B6"}, ${barber.color_to || "#7C3AED"})` }}>
               {barber.name.split(" ").map((n: string) => n[0]).slice(0,2).join("").toUpperCase()}
             </div>
             <div className="flex-1">
@@ -131,7 +131,7 @@ export default function RydraCoachPage() {
                 { l: "Avg Service",  v: avgService,       target: "$70", good: stats?.avg_service_value >= 70, hex: stats?.avg_service_value >= 70 ? "#34D399" : "#FBBF24" },
                 { l: "Upsell Rate", v: `${upsellRate}%`, target: "5%",  good: stats?.upsell_rate >= 0.05, hex: stats?.upsell_rate >= 0.05 ? "#34D399" : "#FBBF24" },
               ].map(({ l, v, target, hex }) => (
-                <div key={l} className="rounded-lg px-4 py-2.5 text-center border" style={{ background: "#090D1A", borderColor: `${hex}25` }}>
+                <div key={l} className="rounded-lg px-4 py-2.5 text-center border" style={{ background: "#0F0A1E", borderColor: `${hex}25` }}>
                   <div className="text-[9px] text-slate-600 mb-0.5">{l}</div>
                   <div className="text-base font-bold" style={{ color: hex }}>{v}</div>
                   <div className="text-[8px] text-slate-700">target {target}</div>
@@ -142,7 +142,7 @@ export default function RydraCoachPage() {
         )}
  
         {/* Tab bar */}
-        <div className="flex gap-1 mb-6 border-b border-[#162038]">
+        <div className="flex gap-1 mb-6 border-b border-[#2A1852]">
           {([
             { k: "mission", label: "Today's Mission" },
             { k: "arena",   label: "Practice Arena" },
@@ -150,7 +150,7 @@ export default function RydraCoachPage() {
             { k: "chat",    label: "Coach Chat" },
           ] as const).map(({ k, label }) => (
             <button key={k} onClick={() => setTab(k)}
-              className={`px-5 py-2.5 text-xs font-semibold uppercase tracking-wider transition-all border-b-2 -mb-px ${tab === k ? "border-indigo-500 text-indigo-400" : "border-transparent text-slate-600 hover:text-slate-300"}`}>
+              className={`px-5 py-2.5 text-xs font-semibold uppercase tracking-wider transition-all border-b-2 -mb-px ${tab === k ? "border-[#7C3AED] text-[#A78BFA]" : "border-transparent text-slate-600 hover:text-slate-300"}`}>
               {label}
             </button>
           ))}
@@ -165,7 +165,7 @@ export default function RydraCoachPage() {
                   <div><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-0.5">AI-Generated</div><h2 className="text-base font-semibold text-white">Today's Mission</h2></div>
                   <button onClick={generateMission} disabled={missionLoading || !barber}
                     className="flex items-center gap-2 px-4 py-2 rounded-md text-xs font-semibold text-white transition-all disabled:opacity-40"
-                    style={{ background: "#4F46E5" }}>
+                    style={{ background: "#5B21B6" }}>
                     {missionLoading ? <><div className="w-3.5 h-3.5 border border-white/30 border-t-white rounded-full animate-spin" />Generating...</> : "Generate Mission"}
                   </button>
                 </div>
@@ -178,7 +178,7 @@ export default function RydraCoachPage() {
                     <div className="text-[11px] text-slate-600 max-w-xs mx-auto">Your AI coach generates a personalised daily target based on your actual rebook rate, upsell rate, and revenue data.</div>
                     <button onClick={generateMission} disabled={missionLoading || !barber}
                       className="mt-5 px-5 py-2.5 rounded-md text-sm font-semibold text-white disabled:opacity-40 transition-all"
-                      style={{ background: "#4F46E5" }}>
+                      style={{ background: "#5B21B6" }}>
                       Generate Today's Mission
                     </button>
                   </div>
@@ -194,7 +194,7 @@ export default function RydraCoachPage() {
                     stats.upsell_rate < 0.05 && { label: "Upsell Opportunity", detail: `${(stats.upsell_rate*100).toFixed(1)}% rate — industry best 8-10%`, extra: `+$${Math.round(stats.total_appts*0.05*25*0.6)}/mo if you add 5%`, hex: "#FBBF24" },
                     stats.pct_returning_clients < 0.25 && { label: "Returning Clients Low", detail: `${(stats.pct_returning_clients*100).toFixed(1)}% — build loyalty`, extra: "Focus on second appointment conversion", hex: "#38BDF8" },
                   ].filter(Boolean).map((opp: any, idx) => (
-                    <div key={idx} className="mb-3 rounded-lg p-3 border" style={{ background: "#090D1A", borderColor: `${opp.hex}20` }}>
+                    <div key={idx} className="mb-3 rounded-lg p-3 border" style={{ background: "#0F0A1E", borderColor: `${opp.hex}20` }}>
                       <div className="text-xs font-semibold mb-1" style={{ color: opp.hex }}>{opp.label}</div>
                       <div className="text-[10px] text-slate-500 mb-1">{opp.detail}</div>
                       <div className="text-[9px] text-emerald-400">{opp.extra}</div>
@@ -225,8 +225,8 @@ export default function RydraCoachPage() {
               <div className="space-y-2">
                 {SCENARIOS.map(sc => (
                   <button key={sc.id} onClick={() => startRoleplay(sc.id)}
-                    className={`w-full text-left rounded-lg p-3.5 border transition-all ${scenario === sc.id ? "border-indigo-500/40" : "border-[#162038] hover:border-[#1E2D4E]"}`}
-                    style={{ background: scenario === sc.id ? `${sc.hex}08` : "#090D1A", borderColor: scenario === sc.id ? `${sc.hex}30` : undefined }}>
+                    className={`w-full text-left rounded-lg p-3.5 border transition-all ${scenario === sc.id ? "border-[#7C3AED]/40" : "border-[#2A1852] hover:border-[#3A2268]"}`}
+                    style={{ background: scenario === sc.id ? `${sc.hex}08` : "#0F0A1E", borderColor: scenario === sc.id ? `${sc.hex}30` : undefined }}>
                     <div className="text-[9px] font-bold uppercase tracking-wider mb-0.5" style={{ color: sc.hex }}>{sc.label}</div>
                     <div className="text-xs text-slate-500">{sc.desc}</div>
                   </button>
@@ -240,7 +240,7 @@ export default function RydraCoachPage() {
                     <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-0.5">Practice Arena</div>
                     <div className="text-sm font-semibold text-white">{SCENARIOS.find(s=>s.id===scenario)?.label} Scenario</div>
                   </div>
-                  <button onClick={() => startRoleplay(scenario)} className="px-3 py-1.5 rounded-md text-[10px] font-semibold border border-[#1E2D4E] text-slate-400 hover:text-white transition-all" style={{ background: "#090D1A" }}>Reset</button>
+                  <button onClick={() => startRoleplay(scenario)} className="px-3 py-1.5 rounded-md text-[10px] font-semibold border border-[#3A2268] text-slate-400 hover:text-white transition-all" style={{ background: "#0F0A1E" }}>Reset</button>
                 </div>
                 <div className="flex-1 overflow-y-auto p-5 space-y-3">
                   {roleplayMsgs.length === 0 ? (
@@ -251,16 +251,16 @@ export default function RydraCoachPage() {
                     roleplayMsgs.map((msg, i) => (
                       <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                         {msg.role === "assistant" && (
-                          <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 mr-2 mt-0.5 text-xs font-bold" style={{ background: msg.type === "feedback" ? "#4F46E5" : "#090D1A", border: "1px solid #1E2D4E", color: msg.type === "feedback" ? "#fff" : "#94A3B8" }}>
+                          <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 mr-2 mt-0.5 text-xs font-bold" style={{ background: msg.type === "feedback" ? "#5B21B6" : "#0F0A1E", border: "1px solid #3A2268", color: msg.type === "feedback" ? "#fff" : "#94A3B8" }}>
                             {msg.type === "feedback" ? "✓" : "C"}
                           </div>
                         )}
-                        <div className={`max-w-[78%] rounded-xl px-4 py-3 text-sm leading-relaxed ${msg.role === "user" ? "bg-indigo-600 text-white rounded-tr-sm" : msg.type === "feedback" ? "border border-indigo-500/30 text-slate-200 rounded-tl-sm" : "border border-[#162038] text-slate-300 rounded-tl-sm"}`}
-                          style={msg.role === "assistant" ? { background: msg.type === "feedback" ? "rgba(99,102,241,0.08)" : "#090D1A" } : {}}>
-                          {msg.type === "feedback" && <div className="text-[9px] font-bold uppercase tracking-widest text-indigo-400 mb-2">Coach Feedback</div>}
+                        <div className={`max-w-[78%] rounded-xl px-4 py-3 text-sm leading-relaxed ${msg.role === "user" ? "bg-[#5B21B6] text-white rounded-tr-sm" : msg.type === "feedback" ? "border border-[#7C3AED]/30 text-slate-200 rounded-tl-sm" : "border border-[#2A1852] text-slate-300 rounded-tl-sm"}`}
+                          style={msg.role === "assistant" ? { background: msg.type === "feedback" ? "rgba(91,33,182,0.12)" : "#0F0A1E" } : {}}>
+                          {msg.type === "feedback" && <div className="text-[9px] font-bold uppercase tracking-widest text-[#A78BFA] mb-2">Coach Feedback</div>}
                           {msg.content}
                         </div>
-                        {msg.role === "user" && <div className="w-7 h-7 rounded-md border border-[#162038] flex items-center justify-center flex-shrink-0 ml-2 mt-0.5 text-xs font-bold text-slate-500" style={{ background: "#090D1A" }}>Y</div>}
+                        {msg.role === "user" && <div className="w-7 h-7 rounded-md border border-[#2A1852] flex items-center justify-center flex-shrink-0 ml-2 mt-0.5 text-xs font-bold text-slate-500" style={{ background: "#0F0A1E" }}>Y</div>}
                       </div>
                     ))
                   )}
@@ -270,8 +270,8 @@ export default function RydraCoachPage() {
                 <div className="border-t border-[#0F1829] p-4">
                   <div className="flex gap-2">
                     <input value={roleplayInput} onChange={e => setRoleplayInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendRoleplay(); }}} disabled={roleplayLoading || roleplayMsgs.length === 0} placeholder="Respond as yourself..."
-                      className="flex-1 rounded-md px-4 py-2.5 text-sm text-white placeholder-slate-600 border border-[#162038] focus:border-indigo-500/40 focus:outline-none transition-all" style={{ background: "#090D1A" }} />
-                    <button onClick={sendRoleplay} disabled={roleplayLoading || !roleplayInput.trim() || roleplayMsgs.length === 0} className="rounded-md px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40 transition-all" style={{ background: "#4F46E5" }}>Reply</button>
+                      className="flex-1 rounded-md px-4 py-2.5 text-sm text-white placeholder-slate-600 border border-[#2A1852] focus:border-[#7C3AED]/40 focus:outline-none transition-all" style={{ background: "#0F0A1E" }} />
+                    <button onClick={sendRoleplay} disabled={roleplayLoading || !roleplayInput.trim() || roleplayMsgs.length === 0} className="rounded-md px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40 transition-all" style={{ background: "#5B21B6" }}>Reply</button>
                   </div>
                   {exchangeCount > 0 && <div className="text-[9px] text-slate-700 mt-2 text-center uppercase tracking-wider">Exchange {exchangeCount} — coach feedback after 3-4 exchanges</div>}
                 </div>
@@ -285,7 +285,7 @@ export default function RydraCoachPage() {
           <div className="space-y-3">
             <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-4">5 proven scripts · click to expand with psychology</div>
             {SCRIPTS.map(s => (
-              <div key={s.title} className={`${CARD} border rounded-xl overflow-hidden transition-all hover:border-[#1E2D4E]`} style={{ borderColor: expandedScript === s.title ? `${s.hex}30` : "#162038" }}>
+              <div key={s.title} className={`${CARD} border rounded-xl overflow-hidden transition-all hover:border-[#3A2268]`} style={{ borderColor: expandedScript === s.title ? `${s.hex}30` : "#2A1852" }}>
                 <button className="w-full flex items-center gap-4 p-5 text-left" onClick={() => setExpandedScript(expandedScript === s.title ? null : s.title)}>
                   <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: s.hex }} />
                   <div className="flex-1">
@@ -296,12 +296,12 @@ export default function RydraCoachPage() {
                 </button>
                 {expandedScript === s.title && (
                   <div className="px-5 pb-5 grid grid-cols-2 gap-4">
-                    <div className="rounded-lg p-4 border" style={{ background: "#090D1A", borderColor: `${s.hex}20` }}>
+                    <div className="rounded-lg p-4 border" style={{ background: "#0F0A1E", borderColor: `${s.hex}20` }}>
                       <div className="text-[9px] font-bold uppercase tracking-widest mb-2" style={{ color: s.hex }}>The Script</div>
                       <p className="text-sm text-slate-200 italic leading-relaxed">{s.script}</p>
                     </div>
-                    <div className="rounded-lg p-4 border border-[#162038]" style={{ background: "#090D1A" }}>
-                      <div className="text-[9px] font-bold uppercase tracking-widest text-indigo-400 mb-2">Psychology</div>
+                    <div className="rounded-lg p-4 border border-[#2A1852]" style={{ background: "#0F0A1E" }}>
+                      <div className="text-[9px] font-bold uppercase tracking-widest text-[#A78BFA] mb-2">Psychology</div>
                       <p className="text-xs text-slate-400 leading-relaxed mb-3">{s.psychology}</p>
                       <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-1">When to use</div>
                       <p className="text-[10px] text-slate-500">{s.target}</p>
@@ -317,36 +317,36 @@ export default function RydraCoachPage() {
         {tab === "chat" && (
           <div className={`${CARD} border ${BDR} rounded-xl overflow-hidden flex flex-col`} style={{ height: "560px" }}>
             <div className="px-5 py-4 border-b border-[#0F1829] flex items-center gap-3 flex-shrink-0">
-              <div className="w-7 h-7 rounded-md bg-indigo-600 flex items-center justify-center"><svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" /></svg></div>
+              <div className="w-7 h-7 rounded-md bg-[#5B21B6] flex items-center justify-center"><svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" /></svg></div>
               <div><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">{firstName}'s personal coach</div><div className="text-sm font-semibold text-white">Ask anything about sales, scripts, or strategy</div></div>
             </div>
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
               {chatMsgs.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
-                  <div className="w-10 h-10 rounded-xl bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center"><svg className="w-5 h-5 text-indigo-500" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" /></svg></div>
+                  <div className="w-10 h-10 rounded-xl bg-[#5B21B6]/10 border border-[#7C3AED]/20 flex items-center justify-center"><svg className="w-5 h-5 text-indigo-500" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" /></svg></div>
                   <div><div className="text-sm font-medium text-white">{firstName}'s personal coach</div><div className="text-[11px] text-slate-600 mt-0.5">Ask about your numbers, scripts, client types, or anything sales</div></div>
                   <div className="flex flex-wrap gap-1.5 justify-center max-w-sm">
                     {["Give me the rebooking script","What's my biggest opportunity today?","How do I upsell without being pushy?","Set me a revenue target for this week"].map(p => (
-                      <button key={p} onClick={() => setChatInput(p)} className="text-[10px] border border-[#162038] text-slate-500 hover:text-slate-200 hover:border-[#1E2D4E] px-2.5 py-1.5 rounded-md transition-all">{p}</button>
+                      <button key={p} onClick={() => setChatInput(p)} className="text-[10px] border border-[#2A1852] text-slate-500 hover:text-slate-200 hover:border-[#3A2268] px-2.5 py-1.5 rounded-md transition-all">{p}</button>
                     ))}
                   </div>
                 </div>
               ) : (
                 chatMsgs.map((msg, i) => (
                   <div key={i} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                    {msg.role === "assistant" && <div className="w-6 h-6 rounded-md bg-indigo-600 flex items-center justify-center flex-shrink-0 mt-0.5"><svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" /></svg></div>}
-                    <div className={`max-w-[78%] rounded-xl px-4 py-3 text-sm leading-relaxed ${msg.role === "user" ? "bg-indigo-600 text-white rounded-tr-sm" : "border border-[#162038] text-slate-300 rounded-tl-sm"}`} style={msg.role === "assistant" ? { background: "#090D1A" } : {}}>{msg.content}</div>
+                    {msg.role === "assistant" && <div className="w-6 h-6 rounded-md bg-[#5B21B6] flex items-center justify-center flex-shrink-0 mt-0.5"><svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" /></svg></div>}
+                    <div className={`max-w-[78%] rounded-xl px-4 py-3 text-sm leading-relaxed ${msg.role === "user" ? "bg-[#5B21B6] text-white rounded-tr-sm" : "border border-[#2A1852] text-slate-300 rounded-tl-sm"}`} style={msg.role === "assistant" ? { background: "#0F0A1E" } : {}}>{msg.content}</div>
                   </div>
                 ))
               )}
-              {chatLoading && <div className="flex gap-3"><div className="w-6 h-6 rounded-md bg-indigo-600 flex items-center justify-center flex-shrink-0"><div className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" /></div><div className="px-4 py-3 rounded-xl rounded-tl-sm border border-[#162038] flex gap-1 items-center" style={{ background: "#090D1A" }}>{[0,150,300].map(d => <div key={d} className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />)}</div></div>}
+              {chatLoading && <div className="flex gap-3"><div className="w-6 h-6 rounded-md bg-[#5B21B6] flex items-center justify-center flex-shrink-0"><div className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" /></div><div className="px-4 py-3 rounded-xl rounded-tl-sm border border-[#2A1852] flex gap-1 items-center" style={{ background: "#0F0A1E" }}>{[0,150,300].map(d => <div key={d} className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />)}</div></div>}
               <div ref={chatEndRef} />
             </div>
             <div className="border-t border-[#0F1829] p-4 flex-shrink-0">
               <form onSubmit={e => { e.preventDefault(); sendChat(); }} className="flex gap-2">
                 <input value={chatInput} onChange={e => setChatInput(e.target.value)} disabled={chatLoading} placeholder={`Ask ${firstName}'s coach anything...`}
-                  className="flex-1 rounded-md px-4 py-2.5 text-sm text-white placeholder-slate-600 border border-[#162038] focus:border-indigo-500/40 focus:outline-none transition-all" style={{ background: "#090D1A" }} />
-                <button type="submit" disabled={chatLoading || !chatInput.trim()} className="rounded-md px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40 transition-all" style={{ background: "#4F46E5" }}>
+                  className="flex-1 rounded-md px-4 py-2.5 text-sm text-white placeholder-slate-600 border border-[#2A1852] focus:border-[#7C3AED]/40 focus:outline-none transition-all" style={{ background: "#0F0A1E" }} />
+                <button type="submit" disabled={chatLoading || !chatInput.trim()} className="rounded-md px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40 transition-all" style={{ background: "#5B21B6" }}>
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
                 </button>
               </form>

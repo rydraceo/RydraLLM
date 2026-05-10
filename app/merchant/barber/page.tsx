@@ -2,11 +2,11 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
  
-const BG   = "bg-[#050810]";
-const CARD  = "bg-[#0C1120]";
-const CARD2 = "bg-[#0F1529]";
-const BDR   = "border-[#162038]";
-const BDR2  = "border-[#1E2D4E]";
+const BG   = "bg-[#0A0612]";
+const CARD  = "bg-[#130C24]";
+const CARD2 = "bg-[#1A1030]";
+const BDR   = "border-[#2A1852]";
+const BDR2  = "border-[#3A2268]";
 const NAV = [
   { href: "/merchant/dashboard", label: "Dashboard" },
   { href: "/merchant/outreach",  label: "Outreach"  },
@@ -56,18 +56,18 @@ export default function BarberSelectorPage() {
     return "on_track";
   }
  
-  if (loading) return <div className={`min-h-screen ${BG} flex items-center justify-center`}><div className="text-center"><div className="w-10 h-10 border border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin mx-auto mb-3" /><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Loading team</div></div></div>;
+  if (loading) return <div className={`min-h-screen ${BG} flex items-center justify-center`}><div className="text-center"><div className="w-10 h-10 border border-[#7C3AED]/20 border-t-indigo-500 rounded-full animate-spin mx-auto mb-3" /><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Loading team</div></div></div>;
  
   return (
     <div className={`min-h-screen ${BG} text-white pb-16`}>
-      <div className="border-b border-[#0F1829] backdrop-blur-xl sticky top-0 z-30" style={{ background: "rgba(5,8,16,0.96)" }}>
+      <div className="border-b border-[#0F1829] backdrop-blur-xl sticky top-0 z-30" style={{ background: "rgba(10,6,18,0.97)" }}>
         <div className="max-w-[1400px] mx-auto px-8 h-14 flex items-center gap-6">
           <div className="flex items-center gap-3 flex-shrink-0">
-            <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center"><svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg></div>
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg, #5B21B6 0%, #D4A017 100%)" }}><svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg></div>
             <div><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Rydra</div><div className="text-sm font-semibold text-white leading-none">Barber Intelligence</div></div>
           </div>
           <nav className="flex items-center gap-1">
-            {NAV.map(tab => <a key={tab.href} href={tab.href} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${(tab as any).active ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white hover:bg-white/[0.05]"}`}>{tab.label}</a>)}
+            {NAV.map(tab => <a key={tab.href} href={tab.href} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${(tab as any).active ? "bg-[#5B21B6] text-white" : "text-slate-400 hover:text-white hover:bg-white/[0.05]"}`}>{tab.label}</a>)}
           </nav>
         </div>
       </div>
@@ -83,7 +83,7 @@ export default function BarberSelectorPage() {
           {[
             { l: "Team Revenue",       v: `$${(teamRevenue/1000).toFixed(0)}k`,               sub: `${barbers.length} active barbers`, acc: "#34D399" },
             { l: "Shop Avg Rebook",    v: `${(avgRebook*100).toFixed(1)}%`,                    sub: "Target: 22%", acc: avgRebook >= 0.22 ? "#34D399" : "#FBBF24" },
-            { l: "Top Earner",         v: topEarner?.name?.split(" ")[0] || "—",               sub: `$${(topEarner?.stats?.total_revenue||0).toLocaleString(undefined,{maximumFractionDigits:0})}`, acc: "#A78BFA" },
+            { l: "Top Earner",         v: topEarner?.name?.split(" ")[0] || "—",               sub: `$${(topEarner?.stats?.total_revenue||0).toLocaleString(undefined,{maximumFractionDigits:0})}`, acc: "#D4A017" },
           ].map(({ l, v, sub, acc }) => (
             <div key={l} className={`${CARD} border ${BDR} rounded-xl p-5 relative overflow-hidden`}>
               <div className="absolute left-0 top-4 bottom-4 w-[2px] rounded-r-full" style={{ background: acc }} />
@@ -102,7 +102,7 @@ export default function BarberSelectorPage() {
             const rebookDiff = b.stats ? ((b.stats.rebook_rate - shopRebook) * 100) : 0;
             const initials = b.name.split(" ").map(n => n[0]).slice(0,2).join("").toUpperCase();
             return (
-              <div key={b.id} className={`${CARD} border ${BDR} rounded-xl overflow-hidden hover:border-[#1E2D4E] transition-all group cursor-pointer`}
+              <div key={b.id} className={`${CARD} border ${BDR} rounded-xl overflow-hidden hover:border-[#3A2268] transition-all group cursor-pointer`}
                 onClick={() => router.push(`/merchant/barber/${b.slug}`)}>
                 <div className="p-5 border-b border-[#0F1829]">
                   <div className="flex items-center gap-3 mb-3">
@@ -122,7 +122,7 @@ export default function BarberSelectorPage() {
                         { l: "Avg Appt",    v: `$${b.stats.avg_appt_value?.toFixed(0)||0}` },
                         { l: "Appts",       v: b.stats.total_appts.toLocaleString() },
                       ].map(({ l, v, col }) => (
-                        <div key={l} className="rounded-md p-2.5" style={{ background: "#090D1A" }}>
+                        <div key={l} className="rounded-md p-2.5" style={{ background: "#0F0A1E" }}>
                           <div className="text-[9px] text-slate-600 mb-0.5">{l}</div>
                           <div className="text-sm font-bold" style={{ color: col || "#fff" }}>{v}</div>
                         </div>
@@ -139,15 +139,15 @@ export default function BarberSelectorPage() {
                       <span className="text-[9px] text-slate-600">Rebook vs shop avg</span>
                       <span className={`text-[9px] font-bold ${rebookDiff >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{rebookDiff >= 0 ? "+" : ""}{rebookDiff.toFixed(1)}%</span>
                     </div>
-                    <div className="h-1 rounded-full" style={{ background: "#162038" }}>
+                    <div className="h-1 rounded-full" style={{ background: "#2A1852" }}>
                       <div className="h-full rounded-full" style={{ width: `${Math.min((b.stats.rebook_rate/0.30)*100,100)}%`, background: rebookDiff >= 0 ? "#34D399" : "#F43F5E" }} />
                     </div>
                     <div className="flex items-center justify-between mt-2.5">
                       <div className="flex items-center gap-1">
-                        {[1,2,3,4,5].map(i => <div key={i} className="w-2 h-2 rounded-sm" style={{ background: i <= Math.round(b.stats!.avg_rating) ? "#FBBF24" : "#162038" }} />)}
+                        {[1,2,3,4,5].map(i => <div key={i} className="w-2 h-2 rounded-sm" style={{ background: i <= Math.round(b.stats!.avg_rating) ? "#FBBF24" : "#2A1852" }} />)}
                         <span className="text-[9px] text-slate-600 ml-1">{b.stats.avg_rating?.toFixed(2)} · {b.stats.review_count} reviews</span>
                       </div>
-                      <span className="text-[9px] font-semibold text-indigo-400 group-hover:text-indigo-300 transition-colors">View dashboard →</span>
+                      <span className="text-[9px] font-semibold text-[#A78BFA] group-hover:text-[#C4B5FD] transition-colors">View dashboard →</span>
                     </div>
                   </div>
                 )}

@@ -1,10 +1,16 @@
 "use client";
 import { useState, useEffect } from "react";
  
-const BG    = "bg-[#050810]";
-const CARD  = "bg-[#0C1120]";
-const BDR   = "border-[#162038]";
-const BDR2  = "border-[#1E2D4E]";
+const BG    = "bg-[#0A0612]";
+const CARD  = "bg-[#130C24]";
+const BDR   = "border-[#2A1852]";
+const BDR2  = "border-[#3A2268]";
+const GOLD  = "#D4A017";
+const GOLD2 = "#C9973A";
+const PUR   = "#5B21B6";
+const PUR_L = "#7C3AED";
+const PUR_LL = "#A78BFA";
+const MUT   = "#6B5C8A";
  
 const NAV = [
   { href: "/merchant/dashboard",  label: "Dashboard"  },
@@ -135,10 +141,10 @@ function RuleBuilder({
       <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
         <div
           className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-xl border shadow-2xl overflow-hidden"
-          style={{ background: "#05080F", borderColor: "#1E2D4E" }}
+          style={{ background: "#05080F", borderColor: "#3A2268" }}
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0" style={{ borderColor: "#162038" }}>
+          <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0" style={{ borderColor: "#2A1852" }}>
             <div>
               <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-0.5">
                 {rule ? "Edit Rule" : "New Automation Rule"}
@@ -148,7 +154,7 @@ function RuleBuilder({
             <button
               onClick={onClose}
               className="w-7 h-7 rounded-md border flex items-center justify-center text-slate-500 hover:text-white transition-all"
-              style={{ background: "#090D1A", borderColor: "#162038" }}
+              style={{ background: "#0F0A1E", borderColor: "#2A1852" }}
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -167,7 +173,7 @@ function RuleBuilder({
                 onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                 placeholder="e.g. At Risk Recovery"
                 className="w-full rounded-md px-4 py-2.5 text-sm text-white placeholder-slate-600 border focus:outline-none transition-all"
-                style={{ background: "#090D1A", borderColor: "#162038" }}
+                style={{ background: "#0F0A1E", borderColor: "#2A1852" }}
               />
             </div>
  
@@ -183,8 +189,8 @@ function RuleBuilder({
                       onClick={() => toggleState(key)}
                       className="px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all border"
                       style={{
-                        background: active ? `${hex}18` : "#090D1A",
-                        borderColor: active ? `${hex}40` : "#162038",
+                        background: active ? `${hex}18` : "#0F0A1E",
+                        borderColor: active ? `${hex}40` : "#2A1852",
                         color: active ? hex : "#64748B",
                       }}
                     >
@@ -218,7 +224,7 @@ function RuleBuilder({
                         setForm(f => ({ ...f, [field]: divisor ? Math.round(val * divisor) : val }));
                       }}
                       className="w-full rounded-md px-3 py-2 text-sm text-white border focus:outline-none"
-                      style={{ background: "#090D1A", borderColor: "#162038" }}
+                      style={{ background: "#0F0A1E", borderColor: "#2A1852" }}
                     />
                   </div>
                 ))}
@@ -239,14 +245,14 @@ function RuleBuilder({
                 rows={3}
                 placeholder="Hey [NAME], the team at Alkami here — it's been a while. Reply YES to book in with [BARBER] this week."
                 className="w-full rounded-md px-4 py-3 text-sm text-white placeholder-slate-600 border focus:outline-none resize-none leading-relaxed"
-                style={{ background: "#090D1A", borderColor: "#162038" }}
+                style={{ background: "#0F0A1E", borderColor: "#2A1852" }}
               />
-              <div className="h-0.5 rounded-full mt-1.5 mb-2" style={{ background: "#162038" }}>
+              <div className="h-0.5 rounded-full mt-1.5 mb-2" style={{ background: "#2A1852" }}>
                 <div
                   className="h-full rounded-full transition-all"
                   style={{
                     width: `${Math.min((charCount / 160) * 100, 100)}%`,
-                    background: charCount > 160 ? "#F43F5E" : "#6366F1",
+                    background: charCount > 160 ? "#F43F5E" : "#7C3AED",
                   }}
                 />
               </div>
@@ -256,7 +262,7 @@ function RuleBuilder({
                   onClick={generateTemplate}
                   disabled={genLoading || !(form.target_states || []).length}
                   className="ml-auto px-3 py-1.5 rounded-md text-[9px] font-bold uppercase tracking-wider disabled:opacity-40 border flex items-center gap-1.5 transition-all"
-                  style={{ background: "#090D1A", borderColor: "#162038", color: "#64748B" }}
+                  style={{ background: "#0F0A1E", borderColor: "#2A1852", color: "#6B5C8A" }}
                 >
                   {genLoading ? (
                     <>
@@ -279,7 +285,7 @@ function RuleBuilder({
                     value={form.send_time || "10:00"}
                     onChange={e => setForm(f => ({ ...f, send_time: e.target.value }))}
                     className="w-full rounded-md px-3 py-2 text-sm text-white border focus:outline-none"
-                    style={{ background: "#090D1A", borderColor: "#162038" }}
+                    style={{ background: "#0F0A1E", borderColor: "#2A1852" }}
                   />
                 </div>
                 <div>
@@ -288,8 +294,8 @@ function RuleBuilder({
                     onClick={() => setForm(f => ({ ...f, is_active: !f.is_active }))}
                     className="w-full py-2 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all border"
                     style={{
-                      background: form.is_active ? "rgba(52,211,153,0.08)" : "#090D1A",
-                      borderColor: form.is_active ? "rgba(52,211,153,0.3)" : "#162038",
+                      background: form.is_active ? "rgba(52,211,153,0.08)" : "#0F0A1E",
+                      borderColor: form.is_active ? "rgba(52,211,153,0.3)" : "#2A1852",
                       color: form.is_active ? "#34D399" : "#64748B",
                     }}
                   >
@@ -307,9 +313,9 @@ function RuleBuilder({
                       onClick={() => toggleDay(day)}
                       className="px-2.5 py-1.5 rounded-md text-[9px] font-bold uppercase tracking-wider transition-all border"
                       style={{
-                        background: active ? "rgba(99,102,241,0.15)" : "#090D1A",
-                        borderColor: active ? "rgba(99,102,241,0.4)" : "#162038",
-                        color: active ? "#818CF8" : "#475569",
+                        background: active ? "rgba(91,33,182,0.2)" : "#0F0A1E",
+                        borderColor: active ? "rgba(91,33,182,0.45)" : "#2A1852",
+                        color: active ? "#A78BFA" : "#475569",
                       }}
                     >
                       {day.slice(0, 3)}
@@ -321,11 +327,11 @@ function RuleBuilder({
           </div>
  
           {/* Footer */}
-          <div className="flex-shrink-0 border-t px-6 py-4 flex gap-3" style={{ background: "#090D1A", borderColor: "#162038" }}>
+          <div className="flex-shrink-0 border-t px-6 py-4 flex gap-3" style={{ background: "#0F0A1E", borderColor: "#2A1852" }}>
             <button
               onClick={onClose}
               className="flex-1 py-2.5 rounded-md border text-slate-400 text-sm font-medium hover:text-white transition-all"
-              style={{ borderColor: "#162038" }}
+              style={{ borderColor: "#2A1852" }}
             >
               Cancel
             </button>
@@ -333,7 +339,7 @@ function RuleBuilder({
               onClick={save}
               disabled={saving || !isValid}
               className="flex-[2] py-2.5 rounded-md text-sm font-semibold text-white disabled:opacity-40 transition-all"
-              style={{ background: "#4F46E5" }}
+              style={{ background: "#5B21B6", boxShadow: "0 4px 20px rgba(212,160,23,0.12)" }}
             >
               {saving ? "Saving..." : rule ? "Save Changes" : "Create Rule"}
             </button>
@@ -406,7 +412,7 @@ export default function AutomationPage() {
   if (loading) return (
     <div className={`min-h-screen ${BG} flex items-center justify-center`}>
       <div className="text-center">
-        <div className="w-10 h-10 border border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin mx-auto mb-3" />
+        <div className="w-10 h-10 border border-[#7C3AED]/20 border-t-[#7C3AED] rounded-full animate-spin mx-auto mb-3" />
         <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Loading autopilot</div>
       </div>
     </div>
@@ -427,11 +433,11 @@ export default function AutomationPage() {
       {/* Nav */}
       <div
         className="border-b border-[#0F1829] backdrop-blur-xl sticky top-0 z-30"
-        style={{ background: "rgba(5,8,16,0.96)" }}
+        style={{ background: "rgba(10,6,18,0.97)" }}
       >
         <div className="max-w-[1400px] mx-auto px-8 h-14 flex items-center gap-6">
           <div className="flex items-center gap-3 flex-shrink-0">
-            <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg, #5B21B6 0%, #D4A017 100%)" }}>
               <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
@@ -448,7 +454,7 @@ export default function AutomationPage() {
                 href={tab.href}
                 className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${
                   (tab as any).active
-                    ? "bg-indigo-600 text-white"
+                    ? "bg-[#5B21B6] text-white"
                     : "text-slate-400 hover:text-white hover:bg-white/[0.05]"
                 }`}
               >
@@ -459,7 +465,7 @@ export default function AutomationPage() {
           <button
             onClick={openCreate}
             className="ml-auto flex items-center gap-2 px-4 py-1.5 rounded-md text-xs font-semibold text-white transition-all"
-            style={{ background: "#4F46E5", boxShadow: "0 2px 12px rgba(99,102,241,0.25)" }}
+            style={{ background: "#5B21B6", boxShadow: "0 2px 12px rgba(91,33,182,0.3)" }}
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -473,7 +479,7 @@ export default function AutomationPage() {
  
         {/* Title */}
         <div className="mb-8">
-          <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-1">
+          <div className="text-[9px] font-bold uppercase tracking-widest mb-1" style={{ color: "#C9973A" }}>
             Alkami Barbershop · Intervention Engine
           </div>
           <h1 className="text-2xl font-bold text-white tracking-tight">Autopilot</h1>
@@ -486,10 +492,10 @@ export default function AutomationPage() {
         {stats && (
           <div className="grid grid-cols-4 gap-4 mb-8">
             {([
-              { l: "Active Rules",      v: stats.active_rules,                                                                 acc: "#6366F1" },
+              { l: "Active Rules",      v: stats.active_rules,                                                                 acc: "#7C3AED" },
               { l: "Sent (30d)",        v: stats.sent_30d.toLocaleString(),                                                    acc: "#34D399" },
               { l: "Rebooked (30d)",    v: stats.rebooked_30d.toLocaleString(),                                                acc: "#FBBF24" },
-              { l: "Revenue Recovered", v: `$${(stats.revenue_30d || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`, acc: "#34D399" },
+              { l: "Revenue Recovered", v: `$${(stats.revenue_30d || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`, acc: "#D4A017" },
             ] as const).map(({ l, v, acc }) => (
               <div key={l} className={`${CARD} border ${BDR} rounded-xl p-5 relative overflow-hidden`}>
                 <div className="absolute left-0 top-3 bottom-3 w-[2px] rounded-r-full" style={{ background: acc }} />
@@ -507,16 +513,16 @@ export default function AutomationPage() {
           <div
             className="rounded-xl border px-5 py-4 mb-6 flex items-start gap-4"
             style={{
-              background: runResult.is_dry ? "rgba(99,102,241,0.06)" : "rgba(52,211,153,0.06)",
-              borderColor: runResult.is_dry ? "rgba(99,102,241,0.25)" : "rgba(52,211,153,0.25)",
+              background: runResult.is_dry ? "rgba(91,33,182,0.1)" : "rgba(52,211,153,0.06)",
+              borderColor: runResult.is_dry ? "rgba(91,33,182,0.3)" : "rgba(52,211,153,0.25)",
             }}
           >
             <div
               className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 mt-0.5"
-              style={{ background: runResult.is_dry ? "rgba(99,102,241,0.15)" : "rgba(52,211,153,0.15)" }}
+              style={{ background: runResult.is_dry ? "rgba(91,33,182,0.2)" : "rgba(52,211,153,0.15)" }}
             >
               {runResult.is_dry ? (
-                <svg className="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 text-[#A78BFA]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                 </svg>
@@ -527,7 +533,7 @@ export default function AutomationPage() {
               )}
             </div>
             <div className="flex-1">
-              <div className={`text-sm font-semibold mb-1 ${runResult.is_dry ? "text-indigo-300" : "text-emerald-300"}`}>
+              <div className={`text-sm font-semibold mb-1 ${runResult.is_dry ? "text-[#C4B5FD]" : "text-emerald-300"}`}>
                 {runResult.is_dry
                   ? `Dry Run — ${runResult.total_sent} messages would be sent`
                   : `Done — ${runResult.total_sent} messages sent`}
@@ -565,8 +571,8 @@ export default function AutomationPage() {
             ].map(({ step, title, desc }) => (
               <div key={step} className="flex flex-col gap-2">
                 <div
-                  className="w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold text-indigo-400"
-                  style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)" }}
+                  className="w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold text-[#A78BFA]"
+                  style={{ background: "rgba(91,33,182,0.18)", border: "1px solid rgba(91,33,182,0.3)" }}
                 >
                   {step}
                 </div>
@@ -582,9 +588,9 @@ export default function AutomationPage() {
           <div className={`${CARD} border ${BDR} rounded-xl p-12 text-center`}>
             <div
               className="w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-4"
-              style={{ background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.18)" }}
+              style={{ background: "rgba(91,33,182,0.12)", border: "1px solid rgba(99,102,241,0.18)" }}
             >
-              <svg className="w-6 h-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-6 h-6 text-[#7C3AED]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
             </div>
@@ -595,7 +601,7 @@ export default function AutomationPage() {
             <button
               onClick={openCreate}
               className="px-5 py-2.5 rounded-md text-sm font-semibold text-white"
-              style={{ background: "#4F46E5" }}
+              style={{ background: "#5B21B6", boxShadow: "0 4px 20px rgba(212,160,23,0.12)" }}
             >
               Create First Rule
             </button>
@@ -615,7 +621,7 @@ export default function AutomationPage() {
                 <div
                   key={rule.id}
                   className={`${CARD} border rounded-xl overflow-hidden transition-all`}
-                  style={{ borderColor: rule.is_active && !rule.is_paused ? "#1E2D4E" : "#162038" }}
+                  style={{ borderColor: rule.is_active && !rule.is_paused ? "#3A2268" : "#2A1852" }}
                 >
                   <div className="p-5">
                     <div className="flex items-start gap-4">
@@ -625,7 +631,7 @@ export default function AutomationPage() {
                         <div
                           className="w-2 h-2 rounded-full"
                           style={{
-                            background: rule.is_active && !rule.is_paused ? "#34D399" : rule.is_paused ? "#FBBF24" : "#162038",
+                            background: rule.is_active && !rule.is_paused ? "#34D399" : rule.is_paused ? "#FBBF24" : "#2A1852",
                             boxShadow: rule.is_active && !rule.is_paused ? "0 0 6px rgba(52,211,153,0.5)" : "none",
                           }}
                         />
@@ -651,7 +657,7 @@ export default function AutomationPage() {
                             })}
                           </div>
                           {!rule.is_active && (
-                            <span className="text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded text-slate-600" style={{ background: "#162038" }}>
+                            <span className="text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded text-slate-600" style={{ background: "#2A1852" }}>
                               Inactive
                             </span>
                           )}
@@ -678,7 +684,7 @@ export default function AutomationPage() {
                             <span
                               key={i}
                               className="text-[9px] text-slate-600 border px-2 py-0.5 rounded"
-                              style={{ background: "#090D1A", borderColor: "#162038" }}
+                              style={{ background: "#0F0A1E", borderColor: "#2A1852" }}
                             >
                               {tag as string}
                             </span>
@@ -688,7 +694,7 @@ export default function AutomationPage() {
                         {/* Message preview */}
                         <div
                           className="rounded-md px-3 py-2 border mb-3"
-                          style={{ background: "#090D1A", borderColor: "#162038" }}
+                          style={{ background: "#0F0A1E", borderColor: "#2A1852" }}
                         >
                           <div className="text-[8px] text-slate-700 uppercase tracking-wider mb-1">Template</div>
                           <p className="text-xs text-slate-400 leading-relaxed">{rule.message_template}</p>
@@ -736,8 +742,8 @@ export default function AutomationPage() {
                           onClick={() => toggleActive(rule)}
                           className="px-3 py-1.5 rounded-md text-[9px] font-bold uppercase tracking-wider transition-all border"
                           style={{
-                            background: rule.is_active ? "rgba(52,211,153,0.06)" : "#090D1A",
-                            borderColor: rule.is_active ? "rgba(52,211,153,0.3)" : "#162038",
+                            background: rule.is_active ? "rgba(52,211,153,0.06)" : "#0F0A1E",
+                            borderColor: rule.is_active ? "rgba(52,211,153,0.3)" : "#2A1852",
                             color: rule.is_active ? "#34D399" : "#64748B",
                           }}
                         >
@@ -748,7 +754,7 @@ export default function AutomationPage() {
                           onClick={() => runNow(rule, false)}
                           disabled={isRunning}
                           className="px-3 py-1.5 rounded-md text-[9px] font-bold uppercase tracking-wider disabled:opacity-40 border flex items-center justify-center gap-1.5 transition-all"
-                          style={{ background: "#090D1A", borderColor: "#1E2D4E", color: "#818CF8" }}
+                          style={{ background: "#0F0A1E", borderColor: "#3A2268", color: "#A78BFA" }}
                         >
                           {runningRule === rule.id ? (
                             <><div className="w-2.5 h-2.5 border border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin" />Running...</>
@@ -759,7 +765,7 @@ export default function AutomationPage() {
                           onClick={() => runNow(rule, true)}
                           disabled={isRunning}
                           className="px-3 py-1.5 rounded-md text-[9px] font-bold uppercase tracking-wider disabled:opacity-40 border flex items-center justify-center gap-1.5 transition-all"
-                          style={{ background: "#090D1A", borderColor: "#162038", color: "#475569" }}
+                          style={{ background: "#0F0A1E", borderColor: "#2A1852", color: "#6B5C8A" }}
                         >
                           {runningRule === rule.id + "-dry" ? (
                             <><div className="w-2.5 h-2.5 border border-slate-400/30 border-t-slate-400 rounded-full animate-spin" />Simulating...</>
@@ -769,7 +775,7 @@ export default function AutomationPage() {
                         <button
                           onClick={() => openEdit(rule)}
                           className="px-3 py-1.5 rounded-md text-[9px] font-bold uppercase tracking-wider border transition-all"
-                          style={{ background: "#090D1A", borderColor: "#162038", color: "#475569" }}
+                          style={{ background: "#0F0A1E", borderColor: "#2A1852", color: "#6B5C8A" }}
                         >
                           Edit
                         </button>
@@ -779,14 +785,14 @@ export default function AutomationPage() {
                             <button
                               onClick={() => deleteRule(rule.id)}
                               className="flex-1 px-2 py-1 rounded-md text-[8px] font-bold uppercase border transition-all"
-                              style={{ background: "#090D1A", borderColor: "rgba(244,63,94,0.3)", color: "#F43F5E" }}
+                              style={{ background: "#0A0612", borderColor: "rgba(244,63,94,0.3)", color: "#F43F5E" }}
                             >
                               Confirm
                             </button>
                             <button
                               onClick={() => setDeleteConfirm(null)}
                               className="px-2 py-1 rounded-md text-[8px] border"
-                              style={{ background: "#090D1A", borderColor: "#162038", color: "#64748B" }}
+                              style={{ background: "#0F0A1E", borderColor: "#2A1852", color: "#6B5C8A" }}
                             >
                               ✕
                             </button>
@@ -795,7 +801,7 @@ export default function AutomationPage() {
                           <button
                             onClick={() => setDeleteConfirm(rule.id)}
                             className="px-3 py-1.5 rounded-md text-[9px] font-bold uppercase tracking-wider border transition-all"
-                            style={{ background: "#090D1A", borderColor: "#162038", color: "#475569" }}
+                            style={{ background: "#0F0A1E", borderColor: "#2A1852", color: "#6B5C8A" }}
                           >
                             Delete
                           </button>
@@ -807,7 +813,7 @@ export default function AutomationPage() {
                   {/* Send-days bar */}
                   <div
                     className="flex border-t px-5 py-2 gap-1"
-                    style={{ background: "#090D1A", borderColor: "#0F1529" }}
+                    style={{ background: "#0F0A1E", borderColor: "#1A1030" }}
                   >
                     {DAYS.map(day => {
                       const active = rule.send_days.includes(day);
@@ -816,8 +822,8 @@ export default function AutomationPage() {
                           key={day}
                           className="flex-1 text-center text-[8px] font-bold uppercase py-1 rounded"
                           style={{
-                            background: active ? "rgba(99,102,241,0.12)" : "transparent",
-                            color: active ? "#818CF8" : "#334155",
+                            background: active ? "rgba(91,33,182,0.18)" : "transparent",
+                            color: active ? "#A78BFA" : "#334155",
                           }}
                         >
                           {day.slice(0, 1)}
@@ -846,13 +852,13 @@ export default function AutomationPage() {
               </svg>
             </div>
             <div>
-              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-1">Vercel Cron Configuration</div>
+              <div className="text-[9px] font-bold uppercase tracking-widest mb-1" style={{ color: "#C9973A" }}>Vercel Cron Configuration</div>
               <div className="text-xs text-slate-400 mb-2">
-                Add this to your <code className="text-indigo-400 bg-indigo-500/10 px-1 py-0.5 rounded text-[10px]">vercel.json</code> to enable nightly automation:
+                Add this to your <code className="text-[#A78BFA] bg-[#7C3AED]/10 px-1 py-0.5 rounded text-[10px]">vercel.json</code> to enable nightly automation:
               </div>
               <div
                 className="rounded-md px-4 py-3 border font-mono text-xs text-emerald-400"
-                style={{ background: "#090D1A", borderColor: "#162038" }}
+                style={{ background: "#0F0A1E", borderColor: "#2A1852" }}
               >
                 {'"crons": [{ "path": "/api/cron/interventions", "schedule": "0 23 * * *" }]'}
               </div>

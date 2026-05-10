@@ -14,11 +14,11 @@ interface GeneratedMsg {
   status: "pending" | "generating" | "done" | "error" | "sent" | "sending";
 }
  
-const BG   = "bg-[#050810]";
+const BG   = "bg-[#0A0612]";
 const SURF = "bg-[#090D1A]";
-const CARD = "bg-[#0C1120]";
-const BDR  = "border-[#162038]";
-const BDR2 = "border-[#1E2D4E]";
+const CARD = "bg-[#130C24]";
+const BDR  = "border-[#2A1852]";
+const BDR2 = "border-[#3A2268]";
  
 const STATE_META: Record<string, { label: string; hex: string; shortLabel: string }> = {
   C:          { label: "First Timer", shortLabel: "New",     hex: "#38BDF8" },
@@ -84,10 +84,10 @@ function PersonalisedSendModal({ selected, customers, onClose, venueId }: { sele
     <>
       <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-40" onClick={step === "done" ? onClose : undefined} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
-        <div className="w-full max-w-3xl max-h-[88vh] flex flex-col rounded-xl border border-[#1E2D4E] shadow-2xl overflow-hidden" style={{ background: "#05080F" }}>
-          <div className="flex items-center justify-between px-6 py-4 border-b border-[#162038] flex-shrink-0">
+        <div className="w-full max-w-3xl max-h-[88vh] flex flex-col rounded-xl border border-[#3A2268] shadow-2xl overflow-hidden" style={{ background: "#05080F" }}>
+          <div className="flex items-center justify-between px-6 py-4 border-b border-[#2A1852] flex-shrink-0">
             <div className="flex items-center gap-3">
-              <div className="w-7 h-7 rounded-md bg-indigo-600 flex items-center justify-center flex-shrink-0">
+              <div className="w-7 h-7 rounded-md bg-[#5B21B6] flex items-center justify-center flex-shrink-0">
                 <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
               </div>
               <div>
@@ -96,13 +96,13 @@ function PersonalisedSendModal({ selected, customers, onClose, venueId }: { sele
               </div>
             </div>
             {!["generating","sending"].includes(step) && (
-              <button onClick={onClose} className="w-7 h-7 rounded-md border border-[#162038] text-slate-500 hover:text-white flex items-center justify-center transition-all">
+              <button onClick={onClose} className="w-7 h-7 rounded-md border border-[#2A1852] text-slate-500 hover:text-white flex items-center justify-center transition-all">
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             )}
           </div>
  
-          <div className="grid grid-cols-4 gap-3 px-6 py-3 border-b border-[#0F1829] flex-shrink-0" style={{ background: "#090D1A" }}>
+          <div className="grid grid-cols-4 gap-3 px-6 py-3 border-b border-[#0F1829] flex-shrink-0" style={{ background: "#0F0A1E" }}>
             {[{ l: "Selected", v: selected.size, c: "text-white" }, { l: "Reachable", v: targets.length, c: "text-emerald-400" }, { l: "No phone", v: noPhone.length, c: noPhone.length > 0 ? "text-rose-400" : "text-slate-600" }, { l: "Est. cost", v: `$${(targets.length * 0.08).toFixed(2)}`, c: "text-rose-400" }].map(({ l, v, c }) => (
               <div key={l} className="text-center py-1">
                 <div className={`text-lg font-bold tracking-tight ${c}`}>{v}</div>
@@ -120,12 +120,12 @@ function PersonalisedSendModal({ selected, customers, onClose, venueId }: { sele
             )}
  
             {(step === "generating") && (
-              <div className="mb-4 rounded-lg p-4 border border-[#162038]" style={{ background: "#090D1A" }}>
+              <div className="mb-4 rounded-lg p-4 border border-[#2A1852]" style={{ background: "#0F0A1E" }}>
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs text-slate-400">Generating personalised messages...</span>
-                  <span className="text-xs font-mono text-indigo-400">{generated}/{targets.length}</span>
+                  <span className="text-xs font-mono text-[#A78BFA]">{generated}/{targets.length}</span>
                 </div>
-                <div className="h-1 rounded-full" style={{ background: "#162038" }}>
+                <div className="h-1 rounded-full" style={{ background: "#2A1852" }}>
                   <div className="h-full rounded-full bg-indigo-500 transition-all duration-300" style={{ width: `${genProgress}%` }} />
                 </div>
                 <p className="text-[10px] text-slate-600 mt-1.5">Each message is unique — personalised with name, history, and strategy</p>
@@ -133,12 +133,12 @@ function PersonalisedSendModal({ selected, customers, onClose, venueId }: { sele
             )}
  
             {step === "sending" && (
-              <div className="mb-4 rounded-lg p-4 border border-[#162038]" style={{ background: "#090D1A" }}>
+              <div className="mb-4 rounded-lg p-4 border border-[#2A1852]" style={{ background: "#0F0A1E" }}>
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs text-slate-400">Sending messages...</span>
                   <span className="text-xs font-mono text-emerald-400">{sentCount}/{targets.length}</span>
                 </div>
-                <div className="h-1 rounded-full" style={{ background: "#162038" }}>
+                <div className="h-1 rounded-full" style={{ background: "#2A1852" }}>
                   <div className="h-full rounded-full bg-emerald-500 transition-all duration-300" style={{ width: `${sendProgress}%` }} />
                 </div>
               </div>
@@ -157,9 +157,9 @@ function PersonalisedSendModal({ selected, customers, onClose, venueId }: { sele
                 const msg = messages.find(m => m.customer_id === c.user_id);
                 const isEditing = editingId === c.user_id;
                 return (
-                  <div key={c.user_id} className="rounded-lg border border-[#162038] p-4 hover:border-[#1E2D4E] transition-all" style={{ background: "#090D1A" }}>
+                  <div key={c.user_id} className="rounded-lg border border-[#2A1852] p-4 hover:border-[#3A2268] transition-all" style={{ background: "#0F0A1E" }}>
                     <div className="flex items-center gap-3 mb-2">
-                      <div className="w-8 h-8 rounded-md border border-[#162038] flex items-center justify-center text-[10px] font-bold text-slate-500 flex-shrink-0" style={{ background: "#0C1120" }}>
+                      <div className="w-8 h-8 rounded-md border border-[#2A1852] flex items-center justify-center text-[10px] font-bold text-slate-500 flex-shrink-0" style={{ background: "#0C1120" }}>
                         {c.name.split(" ").map(n => n[0]).slice(0,2).join("").toUpperCase()}
                       </div>
                       <div className="flex-1 min-w-0">
@@ -167,15 +167,15 @@ function PersonalisedSendModal({ selected, customers, onClose, venueId }: { sele
                           <span className="text-sm font-medium text-white">{c.name}</span>
                           <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ background: `${sm.hex}15`, color: sm.hex }}>{sm.shortLabel}</span>
                           {msg?.status === "sent" && <span className="text-[9px] text-emerald-400 font-semibold uppercase tracking-wider">✓ Sent</span>}
-                          {msg?.status === "sending" && <span className="text-[9px] text-indigo-400 animate-pulse font-semibold uppercase tracking-wider">Sending...</span>}
+                          {msg?.status === "sending" && <span className="text-[9px] text-[#A78BFA] animate-pulse font-semibold uppercase tracking-wider">Sending...</span>}
                           {msg?.status === "error" && <span className="text-[9px] text-rose-400 font-semibold uppercase tracking-wider">Failed</span>}
                         </div>
                         <div className="text-[10px] text-slate-600 mt-0.5">{c.phone} · {c.days_overdue}d overdue · CLV ${c.potential_value}</div>
                       </div>
                       <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
-                        {msg?.status === "pending" && <div className="w-3 h-3 rounded-full border border-[#162038]" />}
+                        {msg?.status === "pending" && <div className="w-3 h-3 rounded-full border border-[#2A1852]" />}
                         {msg?.status === "generating" && <div className="w-3 h-3 border border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin" />}
-                        {msg?.status === "done" && <div className="w-4 h-4 rounded-full bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center"><svg className="w-2.5 h-2.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg></div>}
+                        {msg?.status === "done" && <div className="w-4 h-4 rounded-full bg-indigo-500/20 border border-[#7C3AED]/40 flex items-center justify-center"><svg className="w-2.5 h-2.5 text-[#A78BFA]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg></div>}
                         {msg?.status === "sent" && <div className="w-4 h-4 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center"><svg className="w-2.5 h-2.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg></div>}
                       </div>
                     </div>
@@ -185,19 +185,19 @@ function PersonalisedSendModal({ selected, customers, onClose, venueId }: { sele
                         {isEditing ? (
                           <div>
                             <textarea value={msg.message} onChange={e => setMessages(prev => prev.map(m => m.customer_id === c.user_id ? { ...m, message: e.target.value } : m))} rows={2} maxLength={160}
-                              className="w-full rounded-md px-3 py-2 text-xs text-white focus:outline-none border border-[#1E2D4E] resize-none" style={{ background: "#0C1120" }} />
+                              className="w-full rounded-md px-3 py-2 text-xs text-white focus:outline-none border border-[#3A2268] resize-none" style={{ background: "#0C1120" }} />
                             <div className="flex items-center justify-between mt-1">
                               <span className="text-[9px] text-slate-600">{msg.message.length}/160</span>
-                              <button onClick={() => setEditingId(null)} className="text-[9px] text-indigo-400 hover:text-indigo-300">Done</button>
+                              <button onClick={() => setEditingId(null)} className="text-[9px] text-[#A78BFA] hover:text-[#C4B5FD]">Done</button>
                             </div>
                           </div>
                         ) : (
                           <div className="relative group flex items-start gap-2">
-                            <div className="rounded-xl rounded-tl-sm px-3 py-2 inline-block" style={{ background: "#1D4ED8" }}>
+                            <div className="rounded-xl rounded-tl-sm px-3 py-2 inline-block" style={{ background: "#5B21B6" }}>
                               <p className="text-white text-xs leading-relaxed">{msg.message}</p>
                             </div>
                             {step === "send" && (
-                              <button onClick={() => setEditingId(c.user_id)} className="opacity-0 group-hover:opacity-100 transition-opacity text-[9px] text-slate-600 hover:text-slate-300 mt-1 px-1.5 py-0.5 rounded border border-[#162038]">Edit</button>
+                              <button onClick={() => setEditingId(c.user_id)} className="opacity-0 group-hover:opacity-100 transition-opacity text-[9px] text-slate-600 hover:text-slate-300 mt-1 px-1.5 py-0.5 rounded border border-[#2A1852]">Edit</button>
                             )}
                           </div>
                         )}
@@ -212,13 +212,13 @@ function PersonalisedSendModal({ selected, customers, onClose, venueId }: { sele
             </div>
           </div>
  
-          <div className="flex-shrink-0 border-t border-[#0F1829] px-6 py-4" style={{ background: "#090D1A" }}>
+          <div className="flex-shrink-0 border-t border-[#0F1829] px-6 py-4" style={{ background: "#0F0A1E" }}>
             {step === "review" && (
               <div className="flex gap-2">
-                <button onClick={onClose} className="flex-1 py-2.5 rounded-md border border-[#162038] text-slate-400 text-sm font-medium hover:text-white hover:border-[#1E2D4E] transition-all">Cancel</button>
+                <button onClick={onClose} className="flex-1 py-2.5 rounded-md border border-[#2A1852] text-slate-400 text-sm font-medium hover:text-white hover:border-[#3A2268] transition-all">Cancel</button>
                 <button onClick={generateAll} disabled={targets.length === 0}
                   className="flex-[3] py-2.5 rounded-md text-sm font-semibold text-white transition-all disabled:opacity-40 flex items-center justify-center gap-2"
-                  style={{ background: "#4F46E5" }}>
+                  style={{ background: "#5B21B6" }}>
                   <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" /></svg>
                   Generate {targets.length} Personalised Messages
                 </button>
@@ -232,8 +232,8 @@ function PersonalisedSendModal({ selected, customers, onClose, venueId }: { sele
             )}
             {step === "send" && (
               <div className="flex gap-2">
-                <button onClick={onClose} className="flex-1 py-2.5 rounded-md border border-[#162038] text-slate-400 text-sm font-medium hover:text-white transition-all">Cancel</button>
-                <button onClick={generateAll} className="flex-1 py-2.5 rounded-md border border-[#1E2D4E] text-slate-300 text-sm font-medium hover:text-white transition-all flex items-center justify-center gap-1.5">
+                <button onClick={onClose} className="flex-1 py-2.5 rounded-md border border-[#2A1852] text-slate-400 text-sm font-medium hover:text-white transition-all">Cancel</button>
+                <button onClick={generateAll} className="flex-1 py-2.5 rounded-md border border-[#3A2268] text-slate-300 text-sm font-medium hover:text-white transition-all flex items-center justify-center gap-1.5">
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                   Regenerate
                 </button>
@@ -251,7 +251,7 @@ function PersonalisedSendModal({ selected, customers, onClose, venueId }: { sele
                 Sending {sentCount + 1} of {targets.length}
               </div>
             )}
-            {step === "done" && <button onClick={onClose} className="w-full py-2.5 rounded-md text-sm font-semibold text-white transition-all" style={{ background: "#4F46E5" }}>Done</button>}
+            {step === "done" && <button onClick={onClose} className="w-full py-2.5 rounded-md text-sm font-semibold text-white transition-all" style={{ background: "#5B21B6" }}>Done</button>}
           </div>
         </div>
       </div>
@@ -323,7 +323,7 @@ export default function ClientsPage() {
  
   if (loading) return (
     <div className={`min-h-screen ${BG} flex items-center justify-center`}>
-      <div className="text-center"><div className="w-10 h-10 border border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin mx-auto mb-3" /><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Loading clients</div></div>
+      <div className="text-center"><div className="w-10 h-10 border border-[#7C3AED]/20 border-t-indigo-500 rounded-full animate-spin mx-auto mb-3" /><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Loading clients</div></div>
     </div>
   );
  
@@ -332,26 +332,26 @@ export default function ClientsPage() {
       {showModal && <PersonalisedSendModal selected={selected} customers={customers} onClose={() => setShowModal(false)} venueId={VENUE_ID} />}
  
       {/* Nav */}
-      <div className="border-b border-[#0F1829] backdrop-blur-xl sticky top-0 z-30" style={{ background: "rgba(5,8,16,0.96)" }}>
+      <div className="border-b border-[#0F1829] backdrop-blur-xl sticky top-0 z-30" style={{ background: "rgba(10,6,18,0.97)" }}>
         <div className="max-w-[1800px] mx-auto px-8 h-14 flex items-center gap-6">
           <div className="flex items-center gap-3 flex-shrink-0">
-            <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center"><svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg></div>
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg, #5B21B6 0%, #D4A017 100%)" }}><svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg></div>
             <div><div className="text-[10px] font-semibold uppercase tracking-widest text-slate-600">Rydra</div><div className="text-sm font-semibold text-white leading-none">Client Intelligence</div></div>
           </div>
           <nav className="flex items-center gap-1">
             {[{ href: "/merchant/dashboard", label: "Dashboard" }, { href: "/merchant/outreach", label: "Outreach" }, { href: "/merchant/campaign", label: "Campaign" }, { href: "/merchant/clients", label: "Clients", active: true }, { href: "/merchant/barber", label: "Barbers" }].map(tab => (
-              <a key={tab.href} href={tab.href} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${(tab as any).active ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white hover:bg-white/[0.05]"}`}>{tab.label}</a>
+              <a key={tab.href} href={tab.href} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${(tab as any).active ? "bg-[#5B21B6] text-white" : "text-slate-400 hover:text-white hover:bg-white/[0.05]"}`}>{tab.label}</a>
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-2">
             <div className="text-[10px] text-slate-600">{customers.length.toLocaleString()} records</div>
             {selectMode ? (
-              <button onClick={exitSel} className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium text-slate-400 border border-[#162038] hover:text-white hover:border-[#1E2D4E] transition-all">
+              <button onClick={exitSel} className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium text-slate-400 border border-[#2A1852] hover:text-white hover:border-[#3A2268] transition-all">
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                 Exit Selection
               </button>
             ) : (
-              <button onClick={() => setSelectMode(true)} className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-semibold text-white transition-all" style={{ background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)" }}>
+              <button onClick={() => setSelectMode(true)} className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-semibold text-white transition-all" style={{ background: "rgba(91,33,182,0.2)", border: "1px solid rgba(91,33,182,0.35)" }}>
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 Select Clients
               </button>
@@ -369,12 +369,12 @@ export default function ClientsPage() {
         {/* Search + filter */}
         <div className="flex gap-3 mb-4">
           <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} placeholder="Search name, phone, or email..."
-            className="flex-1 rounded-md px-4 py-2 text-sm text-white placeholder-slate-600 border border-[#162038] hover:border-[#1E2D4E] focus:border-indigo-500/40 focus:outline-none transition-all" style={{ background: "#090D1A" }} />
+            className="flex-1 rounded-md px-4 py-2 text-sm text-white placeholder-slate-600 border border-[#2A1852] hover:border-[#3A2268] focus:border-[#7C3AED]/40 focus:outline-none transition-all" style={{ background: "#0F0A1E" }} />
           <div className="flex gap-1">
             {[["all","All"], ["X","Churned"], ["R_at_risk","At Risk"], ["R_on_fence","On Fence"], ["C","First Timer"], ["R_loyal","Loyal"]].map(([val, label]) => (
               <button key={val} onClick={() => { setStateFilter(val); setPage(1); }}
-                className={`px-3 py-2 rounded-md text-[10px] font-semibold uppercase tracking-wider transition-all ${stateFilter === val ? "bg-indigo-600 text-white" : "text-slate-500 border border-[#162038] hover:text-white hover:border-[#1E2D4E]"}`}
-                style={stateFilter !== val ? { background: "#090D1A" } : {}}>
+                className={`px-3 py-2 rounded-md text-[10px] font-semibold uppercase tracking-wider transition-all ${stateFilter === val ? "bg-[#5B21B6] text-white" : "text-slate-500 border border-[#2A1852] hover:text-white hover:border-[#3A2268]"}`}
+                style={stateFilter !== val ? { background: "#0F0A1E" } : {}}>
                 {label}
               </button>
             ))}
@@ -383,8 +383,8 @@ export default function ClientsPage() {
  
         {/* Select mode strip */}
         {selectMode && (
-          <div className="rounded-lg border border-[#1E2D4E] px-5 py-3 mb-4 flex items-center gap-3 flex-wrap" style={{ background: "rgba(99,102,241,0.05)" }}>
-            <span className="text-[9px] font-bold uppercase tracking-widest text-indigo-400 mr-1">Quick select</span>
+          <div className="rounded-lg border border-[#3A2268] px-5 py-3 mb-4 flex items-center gap-3 flex-wrap" style={{ background: "rgba(99,102,241,0.05)" }}>
+            <span className="text-[9px] font-bold uppercase tracking-widest text-[#A78BFA] mr-1">Quick select</span>
             {[{ state: "X", label: "All Churned", hex: "#F43F5E" }, { state: "R_at_risk", label: "All At Risk", hex: "#FB923C" }, { state: "R_on_fence", label: "All On Fence", hex: "#FBBF24" }, { state: "C", label: "All First Timers", hex: "#38BDF8" }, { state: "R_loyal", label: "All Loyal", hex: "#34D399" }].map(({ state, label, hex }) => (
               <button key={state} onClick={() => selectByState(state)}
                 className="px-3 py-1 rounded text-[10px] font-semibold uppercase tracking-wider transition-all"
@@ -392,7 +392,7 @@ export default function ClientsPage() {
                 {label} <span style={{ color: `${hex}60` }}>({customers.filter(c => c.markov_state === state).length})</span>
               </button>
             ))}
-            <button onClick={selectFiltered} className="px-3 py-1 rounded text-[10px] font-semibold uppercase tracking-wider border border-[#1E2D4E] text-slate-400 hover:text-white transition-all" style={{ background: "#090D1A" }}>
+            <button onClick={selectFiltered} className="px-3 py-1 rounded text-[10px] font-semibold uppercase tracking-wider border border-[#3A2268] text-slate-400 hover:text-white transition-all" style={{ background: "#0F0A1E" }}>
               View ({filtered.length})
             </button>
             {selected.size > 0 && <button onClick={clearSel} className="ml-auto text-[10px] text-slate-600 hover:text-slate-400 transition-colors">Clear selection</button>}
@@ -400,7 +400,7 @@ export default function ClientsPage() {
         )}
  
         <div className="text-[9px] font-semibold uppercase tracking-widest text-slate-600 mb-4">
-          {filtered.length.toLocaleString()} clients{selectMode && selected.size > 0 ? <span className="text-indigo-400 ml-2">· {selected.size} selected ({selectedWithPhone} with phone)</span> : ""}
+          {filtered.length.toLocaleString()} clients{selectMode && selected.size > 0 ? <span className="text-[#A78BFA] ml-2">· {selected.size} selected ({selectedWithPhone} with phone)</span> : ""}
           {!selectMode && " · click row to open profile · click header to sort"}
         </div>
  
@@ -409,8 +409,8 @@ export default function ClientsPage() {
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-[#0F1829]" style={{ background: "#090D1A" }}>
-                  {selectMode && <th className="px-4 py-3 w-8"><div className="w-3 h-3 rounded border border-[#162038]" /></th>}
+                <tr className="border-b border-[#0F1829]" style={{ background: "#0F0A1E" }}>
+                  {selectMode && <th className="px-4 py-3 w-8"><div className="w-3 h-3 rounded border border-[#2A1852]" /></th>}
                   {[
                     { l: "Client",       k: "name" as SortKey },
                     { l: "State",        k: null },
@@ -438,17 +438,17 @@ export default function ClientsPage() {
                   const lv = c.last_visit ? new Date(c.last_visit).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "2-digit" }) : "—";
                   return (
                     <tr key={c.score_id} onClick={() => handleRowClick(c)}
-                      className={`border-b border-[#0A0F1C] cursor-pointer transition-colors group ${isSel ? "bg-indigo-600/[0.08]" : "hover:bg-white/[0.018]"}`}>
+                      className={`border-b border-[#0A0F1C] cursor-pointer transition-colors group ${isSel ? "bg-[#5B21B6]/[0.08]" : "hover:bg-white/[0.018]"}`}>
                       {selectMode && (
                         <td className="px-4 py-3.5">
-                          <div className={`w-4 h-4 rounded border-[1.5px] flex items-center justify-center transition-all ${isSel ? "bg-indigo-600 border-indigo-500" : "border-[#1E2D4E] hover:border-indigo-500/50"}`}>
+                          <div className={`w-4 h-4 rounded border-[1.5px] flex items-center justify-center transition-all ${isSel ? "bg-[#5B21B6] border-[#7C3AED]" : "border-[#3A2268] hover:border-[#7C3AED]/50"}`}>
                             {isSel && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                           </div>
                         </td>
                       )}
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-2.5">
-                          <div className={`w-7 h-7 rounded-md border flex items-center justify-center text-[9px] font-bold transition-all flex-shrink-0 ${isSel ? "bg-indigo-600/30 border-indigo-500/40 text-indigo-300" : "border-[#162038] text-slate-600 group-hover:border-[#1E2D4E]"}`} style={{ background: isSel ? undefined : "#090D1A" }}>
+                          <div className={`w-7 h-7 rounded-md border flex items-center justify-center text-[9px] font-bold transition-all flex-shrink-0 ${isSel ? "bg-[#5B21B6]/30 border-[#7C3AED]/40 text-[#C4B5FD]" : "border-[#2A1852] text-slate-600 group-hover:border-[#3A2268]"}`} style={{ background: isSel ? undefined : "#0F0A1E" }}>
                             {c.name.split(" ").map(n => n[0]).slice(0,2).join("").toUpperCase()}
                           </div>
                           <div>
@@ -478,11 +478,11 @@ export default function ClientsPage() {
           </div>
           {filtered.length === 0 && <div className="text-center py-12 text-[9px] font-bold uppercase tracking-widest text-slate-700">No clients found</div>}
           {filtered.length > 0 && (
-            <div className="flex items-center justify-between px-5 py-3 border-t border-[#0F1829]" style={{ background: "#090D1A" }}>
+            <div className="flex items-center justify-between px-5 py-3 border-t border-[#0F1829]" style={{ background: "#0F0A1E" }}>
               <div className="text-[9px] text-slate-600 uppercase tracking-wider">{((page-1)*PER_PAGE)+1}–{Math.min(page*PER_PAGE,filtered.length)} of {filtered.length.toLocaleString()}</div>
               <div className="flex items-center gap-2">
                 {[{ l: "←", a: () => setPage(p => Math.max(1,p-1)), d: page===1 }, { l: "→", a: () => setPage(p => Math.min(totalPages,p+1)), d: page===totalPages }].map(({ l, a, d }) => (
-                  <button key={l} onClick={a} disabled={d} className="w-7 h-7 rounded border border-[#162038] text-slate-500 text-sm disabled:opacity-30 hover:border-[#1E2D4E] hover:text-white transition-all" style={{ background: "#090D1A" }}>{l}</button>
+                  <button key={l} onClick={a} disabled={d} className="w-7 h-7 rounded border border-[#2A1852] text-slate-500 text-sm disabled:opacity-30 hover:border-[#3A2268] hover:text-white transition-all" style={{ background: "#0F0A1E" }}>{l}</button>
                 ))}
                 <span className="text-[9px] text-slate-600 px-1">{page}/{totalPages}</span>
               </div>
@@ -494,9 +494,9 @@ export default function ClientsPage() {
       {/* Floating action bar */}
       {selectMode && selected.size > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40">
-          <div className="flex items-center gap-4 rounded-xl px-6 py-3.5 border shadow-2xl" style={{ background: "#0C1120", borderColor: "#1E2D4E", boxShadow: "0 20px 60px rgba(0,0,0,0.6), 0 0 40px rgba(99,102,241,0.1)" }}>
+          <div className="flex items-center gap-4 rounded-xl px-6 py-3.5 border shadow-2xl" style={{ background: "#0C1120", borderColor: "#3A2268", boxShadow: "0 20px 60px rgba(0,0,0,0.6), 0 0 40px rgba(91,33,182,0.15)" }}>
             <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-md bg-indigo-600 flex items-center justify-center text-white font-bold text-xs">{selected.size}</div>
+              <div className="w-7 h-7 rounded-md bg-[#5B21B6] flex items-center justify-center text-white font-bold text-xs">{selected.size}</div>
               <div>
                 <div className="text-white font-semibold text-sm">{selected.size} clients selected</div>
                 <div className="text-[10px] text-slate-600">{selectedWithPhone} reachable · ${(selectedWithPhone * 0.08).toFixed(2)} est.</div>
@@ -512,10 +512,10 @@ export default function ClientsPage() {
             </div>
             <div className="w-px h-8 bg-[#162038]" />
             <div className="flex items-center gap-2">
-              <button onClick={clearSel} className="px-3 py-1.5 rounded-md border border-[#162038] text-slate-500 hover:text-white text-xs font-medium transition-all hover:border-[#1E2D4E]">Clear</button>
+              <button onClick={clearSel} className="px-3 py-1.5 rounded-md border border-[#2A1852] text-slate-500 hover:text-white text-xs font-medium transition-all hover:border-[#3A2268]">Clear</button>
               <button onClick={() => setShowModal(true)} disabled={selectedWithPhone === 0}
                 className="flex items-center gap-2 px-4 py-2 rounded-md text-white text-xs font-semibold transition-all disabled:opacity-40"
-                style={{ background: "#4F46E5", boxShadow: "0 4px 20px rgba(99,102,241,0.3)" }}>
+                style={{ background: "#5B21B6", boxShadow: "0 4px 20px rgba(91,33,182,0.35)" }}>
                 <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" /></svg>
                 AI Personalise + Send {selectedWithPhone}
               </button>

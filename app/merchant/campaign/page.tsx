@@ -2,11 +2,11 @@
 import { useState, useEffect, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
  
-const BG   = "bg-[#050810]";
-const CARD  = "bg-[#0C1120]";
-const CARD2 = "bg-[#0F1529]";
-const BDR   = "border-[#162038]";
-const TIP   = { backgroundColor: "#0C1120", border: "1px solid #1E2D4E", borderRadius: "4px", color: "#fff", fontSize: "11px" };
+const BG   = "bg-[#0A0612]";
+const CARD  = "bg-[#130C24]";
+const CARD2 = "bg-[#1A1030]";
+const BDR   = "border-[#2A1852]";
+const TIP   = { backgroundColor: "#130C24", border: "1px solid #3A2268", borderRadius: "4px", color: "#fff", fontSize: "11px" };
 const NAV = [
   { href: "/merchant/dashboard", label: "Dashboard" },
   { href: "/merchant/outreach",  label: "Outreach"  },
@@ -150,7 +150,7 @@ export default function CampaignPage() {
   if (loading) return (
     <div className={`min-h-screen ${BG} flex items-center justify-center`}>
       <div className="text-center">
-        <div className="w-10 h-10 border border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin mx-auto mb-3" />
+        <div className="w-10 h-10 border border-[#7C3AED]/20 border-t-indigo-500 rounded-full animate-spin mx-auto mb-3" />
         <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Loading data</div>
       </div>
     </div>
@@ -159,10 +159,10 @@ export default function CampaignPage() {
   return (
     <div className={`min-h-screen ${BG} text-white pb-16`}>
       {/* Nav */}
-      <div className="border-b border-[#0F1829] backdrop-blur-xl sticky top-0 z-30" style={{ background: "rgba(5,8,16,0.96)" }}>
+      <div className="border-b border-[#0F1829] backdrop-blur-xl sticky top-0 z-30" style={{ background: "rgba(10,6,18,0.97)" }}>
         <div className="max-w-[1600px] mx-auto px-8 h-14 flex items-center gap-6">
           <div className="flex items-center gap-3 flex-shrink-0">
-            <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg, #5B21B6 0%, #D4A017 100%)" }}>
               <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" /></svg>
             </div>
             <div>
@@ -173,7 +173,7 @@ export default function CampaignPage() {
           <nav className="flex items-center gap-1">
             {NAV.map(tab => (
               <a key={tab.href} href={tab.href}
-                className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${(tab as any).active ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white hover:bg-white/[0.05]"}`}>
+                className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${(tab as any).active ? "bg-[#5B21B6] text-white" : "text-slate-400 hover:text-white hover:bg-white/[0.05]"}`}>
                 {tab.label}
               </a>
             ))}
@@ -200,8 +200,8 @@ export default function CampaignPage() {
                 <div className="grid grid-cols-2 gap-1.5">
                   {[["all","All States"],["X","Churned"],["R_at_risk","At Risk"],["R_on_fence","On Fence"],["C","First Timer"],["R_loyal","Loyal"]].map(([val, label]) => (
                     <button key={val} onClick={() => setMarkovFilter(val)}
-                      className={`py-2 px-2.5 rounded-md text-[9px] font-bold uppercase tracking-wider transition-all ${markovFilter === val ? "bg-indigo-600 text-white" : "border border-[#162038] text-slate-500 hover:text-slate-200"}`}
-                      style={markovFilter !== val ? { background: "#090D1A" } : {}}>
+                      className={`py-2 px-2.5 rounded-md text-[9px] font-bold uppercase tracking-wider transition-all ${markovFilter === val ? "bg-[#5B21B6] text-white" : "border border-[#2A1852] text-slate-500 hover:text-slate-200"}`}
+                      style={markovFilter !== val ? { background: "#0F0A1E" } : {}}>
                       {label}
                       {val !== "all" && STATE_META[val] && (
                         <span className="ml-1 opacity-60">({customers.filter(c => c.markov_state === val).length})</span>
@@ -220,7 +220,7 @@ export default function CampaignPage() {
                 <input type="range" min={0} max={500} step={10} value={minCLV}
                   onChange={e => setMinCLV(Number(e.target.value))}
                   className="w-full h-1 rounded-full appearance-none accent-indigo-500"
-                  style={{ background: "#162038" }} />
+                  style={{ background: "#2A1852" }} />
                 <div className="flex justify-between text-[9px] text-slate-700 mt-1"><span>$0</span><span>$500</span></div>
               </div>
  
@@ -232,9 +232,9 @@ export default function CampaignPage() {
                 </div>
                 <div className="flex gap-2">
                   <input type="number" min={0} value={minDays} onChange={e => setMinDays(Number(e.target.value))} placeholder="Min"
-                    className="w-1/2 rounded-md px-3 py-1.5 text-xs text-white border border-[#162038] focus:outline-none focus:border-indigo-500/40" style={{ background: "#090D1A" }} />
+                    className="w-1/2 rounded-md px-3 py-1.5 text-xs text-white border border-[#2A1852] focus:outline-none focus:border-[#7C3AED]/40" style={{ background: "#0F0A1E" }} />
                   <input type="number" min={0} value={maxDays === 999 ? "" : maxDays} onChange={e => setMaxDays(e.target.value === "" ? 999 : Number(e.target.value))} placeholder="Max"
-                    className="w-1/2 rounded-md px-3 py-1.5 text-xs text-white border border-[#162038] focus:outline-none focus:border-indigo-500/40" style={{ background: "#090D1A" }} />
+                    className="w-1/2 rounded-md px-3 py-1.5 text-xs text-white border border-[#2A1852] focus:outline-none focus:border-[#7C3AED]/40" style={{ background: "#0F0A1E" }} />
                 </div>
               </div>
  
@@ -269,7 +269,7 @@ export default function CampaignPage() {
                         <span className="text-[9px] font-semibold" style={{ color: hex }}>{label}</span>
                         <span className="text-[9px] text-slate-600">{count} ({pct.toFixed(0)}%)</span>
                       </div>
-                      <div className="h-1 rounded-full" style={{ background: "#162038" }}>
+                      <div className="h-1 rounded-full" style={{ background: "#2A1852" }}>
                         <div className="h-full rounded-full" style={{ width: `${pct}%`, background: hex }} />
                       </div>
                     </div>
@@ -308,11 +308,11 @@ export default function CampaignPage() {
                   </div>
                   <ResponsiveContainer width="100%" height={160}>
                     <BarChart data={forecast} margin={{ left: -20 }}>
-                      <XAxis dataKey="month" stroke="#1E2D4E" fontSize={10} tick={{ fill: "#475569" }} />
-                      <YAxis stroke="#1E2D4E" fontSize={10} tick={{ fill: "#475569" }} tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}k`} />
+                      <XAxis dataKey="month" stroke="#3A2268" fontSize={10} tick={{ fill: "#475569" }} />
+                      <YAxis stroke="#3A2268" fontSize={10} tick={{ fill: "#475569" }} tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}k`} />
                       <Tooltip contentStyle={TIP} formatter={tipFormatter} />
-                      <Bar dataKey="baseline" fill="#162038" radius={[3, 3, 0, 0]} name="baseline" />
-                      <Bar dataKey="campaign" fill="#6366F1" radius={[3, 3, 0, 0]} name="campaign" />
+                      <Bar dataKey="baseline" fill="#1A1030" radius={[3, 3, 0, 0]} name="baseline" />
+                      <Bar dataKey="campaign" fill="#7C3AED" radius={[3, 3, 0, 0]} name="campaign" />
                     </BarChart>
                   </ResponsiveContainer>
                   <div className="text-[9px] text-slate-700 text-center mt-2 uppercase tracking-wider">
@@ -335,8 +335,8 @@ export default function CampaignPage() {
               <div className="mb-4">
                 <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-2">Campaign Name</div>
                 <input value={campaignName} onChange={e => setCampaignName(e.target.value)} placeholder="e.g. May Win-Back Campaign"
-                  className="w-full rounded-md px-4 py-2.5 text-sm text-white placeholder-slate-600 border border-[#162038] focus:border-indigo-500/40 focus:outline-none transition-all"
-                  style={{ background: "#090D1A" }} />
+                  className="w-full rounded-md px-4 py-2.5 text-sm text-white placeholder-slate-600 border border-[#2A1852] focus:border-[#7C3AED]/40 focus:outline-none transition-all"
+                  style={{ background: "#0F0A1E" }} />
               </div>
  
               {/* Message */}
@@ -350,14 +350,14 @@ export default function CampaignPage() {
                 </div>
                 <textarea value={message} onChange={e => setMessage(e.target.value)} rows={4} maxLength={320}
                   placeholder="Hey [NAME], it's been a while — we'd love to see you back at Alkami. Book this week with [BARBER]. Reply YES to lock in your spot."
-                  className="w-full rounded-md px-4 py-3 text-sm text-white placeholder-slate-600 border border-[#162038] focus:border-indigo-500/40 focus:outline-none transition-all resize-none leading-relaxed"
-                  style={{ background: "#090D1A" }} />
-                <div className="h-0.5 rounded-full mt-1.5" style={{ background: "#162038" }}>
-                  <div className="h-full rounded-full transition-all" style={{ width: `${Math.min((charCount / 160) * 100, 100)}%`, background: charCount > 160 ? "#F43F5E" : charCount > 140 ? "#FBBF24" : "#6366F1" }} />
+                  className="w-full rounded-md px-4 py-3 text-sm text-white placeholder-slate-600 border border-[#2A1852] focus:border-[#7C3AED]/40 focus:outline-none transition-all resize-none leading-relaxed"
+                  style={{ background: "#0F0A1E" }} />
+                <div className="h-0.5 rounded-full mt-1.5" style={{ background: "#2A1852" }}>
+                  <div className="h-full rounded-full transition-all" style={{ width: `${Math.min((charCount / 160) * 100, 100)}%`, background: charCount > 160 ? "#F43F5E" : charCount > 140 ? "#FBBF24" : "#7C3AED" }} />
                 </div>
                 <button onClick={generateMessage} disabled={aiLoading || audienceWithPhone.length === 0}
-                  className="mt-3 w-full py-2.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 disabled:opacity-40 border border-[#162038] text-slate-500 hover:text-slate-200 hover:border-[#1E2D4E]"
-                  style={{ background: "#090D1A" }}>
+                  className="mt-3 w-full py-2.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 disabled:opacity-40 border border-[#2A1852] text-slate-500 hover:text-slate-200 hover:border-[#3A2268]"
+                  style={{ background: "#0F0A1E" }}>
                   {aiLoading
                     ? <><div className="w-3 h-3 border border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin" />Generating...</>
                     : `✦ Write with AI — optimised for ${STATE_META[markovFilter]?.label || "this segment"}`}
@@ -366,7 +366,7 @@ export default function CampaignPage() {
  
               {/* Preview */}
               {message && audienceWithPhone.length > 0 && (
-                <div className="mb-4 rounded-md p-3 border border-[#162038]" style={{ background: "#090D1A" }}>
+                <div className="mb-4 rounded-md p-3 border border-[#2A1852]" style={{ background: "#0F0A1E" }}>
                   <div className="text-[9px] text-slate-700 uppercase tracking-wider mb-2">Preview — first recipient</div>
                   <div className="flex justify-end">
                     <div className="max-w-[80%] bg-[#1D4ED8] rounded-2xl rounded-tr-sm px-3 py-2">
@@ -391,27 +391,27 @@ export default function CampaignPage() {
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs text-slate-400">Sending campaign...</span>
-                    <span className="text-xs font-mono text-indigo-400">{sendProgress}%</span>
+                    <span className="text-xs font-mono text-[#A78BFA]">{sendProgress}%</span>
                   </div>
-                  <div className="h-1 rounded-full" style={{ background: "#162038" }}>
+                  <div className="h-1 rounded-full" style={{ background: "#2A1852" }}>
                     <div className="h-full rounded-full bg-indigo-500 transition-all" style={{ width: `${sendProgress}%` }} />
                   </div>
                 </div>
               ) : (
                 <div className="flex gap-3">
                   {[
-                    { l: audienceWithPhone.length.toLocaleString(), sub: "recipients", hex: "#6366F1" },
+                    { l: audienceWithPhone.length.toLocaleString(), sub: "recipients", hex: "#7C3AED" },
                     { l: `-$${cost.toFixed(2)}`,                    sub: "cost",       hex: "#F43F5E" },
                     { l: `+$${netUplift.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, sub: "net uplift", hex: "#34D399" },
                   ].map(({ l, sub, hex }) => (
-                    <div key={sub} className="flex-1 rounded-md p-3 text-center border border-[#162038]" style={{ background: "#090D1A" }}>
+                    <div key={sub} className="flex-1 rounded-md p-3 text-center border border-[#2A1852]" style={{ background: "#0F0A1E" }}>
                       <div className="text-base font-bold" style={{ color: hex }}>{l}</div>
                       <div className="text-[9px] text-slate-700 uppercase tracking-wider mt-0.5">{sub}</div>
                     </div>
                   ))}
                   <button onClick={launchCampaign} disabled={!message.trim() || audienceWithPhone.length === 0 || charCount > 160}
                     className="flex-[2] py-3 rounded-md text-sm font-semibold text-white disabled:opacity-40 transition-all flex items-center justify-center gap-2"
-                    style={{ background: "#4F46E5", boxShadow: "0 4px 20px rgba(99,102,241,0.2)" }}>
+                    style={{ background: "#5B21B6", boxShadow: "0 4px 20px rgba(91,33,182,0.25)" }}>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
                     Launch Campaign
                   </button>
@@ -424,3 +424,4 @@ export default function CampaignPage() {
     </div>
   );
 }
+ 
