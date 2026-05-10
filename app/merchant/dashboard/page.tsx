@@ -1,6 +1,7 @@
 "use client";
  
 import { useState, useEffect, useMemo, useRef } from "react";
+import { RevenueRecoveryWidget, DemandHeatmapWidget } from "@/app/components/dashboard-widgets";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
  
 interface Customer {
@@ -406,6 +407,12 @@ export default function DashboardPage() {
             </div>
           ))}
         </div>
+ 
+        {/* ── Revenue Recovery ── */}
+        <RevenueRecoveryWidget venueId={VENUE_ID} />
+ 
+        {/* ── Demand Heatmap ── */}
+        <DemandHeatmapWidget venueId={VENUE_ID} customers={customers} />
  
         {/* ── Morning Brief ── */}
         <MorningBrief venueId={VENUE_ID} />

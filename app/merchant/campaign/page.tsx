@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
  
 const BG   = "bg-[#0A0612]";
@@ -64,7 +65,31 @@ export default function CampaignPage() {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [sendProgress, setSendProgress] = useState(0);
+  const [heatmapBanner, setHeatmapBanner] = useState<string | null>(null);
   const VENUE_ID = process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID || "e1a6c15d-8ccc-4f58-aefb-8bea46e39918";
+  const searchParams = useSearchParams();
+ 
+  // Auto-configure from heatmap
+  useEffect(() => {
+    const source = searchParams.get("source");
+    const states = searchParams.get("states");
+    const heatmapDate = searchParams.get("heatmap_date");
+    if (source === "heatmap" && states) {
+      const stateList = states.split(",");
+      // Set the primary state filter
+      if (stateList.length === 1) {
+        setMarkovFilter(stateList[0]);
+      } else {
+        setMarkovFilter("all"); // Will show a multi-state banner
+      }
+      if (heatmapDate) {
+        const d = new Date(heatmapDate);
+        const label = d.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" });
+        setHeatmapBanner(`Heatmap insight: ${label} is a slow day. Audience pre-configured to At Risk + On Fence clients.`);
+        setCampaignName(`Fill ${label} — Heatmap Campaign`);
+      }
+    }
+  }, [searchParams]);
  
   useEffect(() => {
     fetch(`/api/intelligence/at-risk-customers?venue_id=${VENUE_ID}`)
@@ -185,6 +210,18 @@ export default function CampaignPage() {
         <div className="mb-8">
           <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-1">Alkami Barbershop · Revenue Forecasting + Bulk Outreach</div>
           <h1 className="text-2xl font-bold text-white tracking-tight">Campaign Builder</h1>
+          {heatmapBanner && (
+            <div className="mt-3 flex items-center gap-3 px-4 py-2.5 rounded-lg border"
+              style={{ background: "rgba(212,160,23,0.08)", borderColor: "rgba(212,160,23,0.3)" }}>
+              <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#D4A017" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <span className="text-sm" style={{ color: "#D4A017" }}>{heatmapBanner}</span>
+              <button onClick={() => setHeatmapBanner(null)} className="ml-auto" style={{ color: "#6B5C8A" }}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+          )}
         </div>
  
         <div className="grid grid-cols-3 gap-5">
@@ -424,4 +461,3 @@ export default function CampaignPage() {
     </div>
   );
 }
- 
