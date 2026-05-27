@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { DiaryWidget } from "@/app/components/diary-widget";
  
 const BG   = "bg-[#0A0612]";
 const CARD  = "bg-[#130C24]";
@@ -32,7 +33,7 @@ export default function RydraCoachPage() {
   const slug = params?.id as string;
   const [barber, setBarber] = useState<any>(null);
   const [stats, setStats] = useState<any>(null);
-  const [tab, setTab] = useState<"mission"|"arena"|"vault"|"chat">("mission");
+  const [tab, setTab] = useState<"mission"|"arena"|"vault"|"chat"|"diary">("mission");
   const [mission, setMission] = useState(""); const [missionLoading, setMissionLoading] = useState(false);
   const [scenario, setScenario] = useState(SCENARIOS[0].id);
   const [roleplayMsgs, setRoleplayMsgs] = useState<CoachMsg[]>([]);
@@ -148,6 +149,7 @@ export default function RydraCoachPage() {
             { k: "arena",   label: "Practice Arena" },
             { k: "vault",   label: "Script Vault" },
             { k: "chat",    label: "Coach Chat" },
+            { k: "diary",   label: "Diary" },
           ] as const).map(({ k, label }) => (
             <button key={k} onClick={() => setTab(k)}
               className={`px-5 py-2.5 text-xs font-semibold uppercase tracking-wider transition-all border-b-2 -mb-px ${tab === k ? "border-[#7C3AED] text-[#A78BFA]" : "border-transparent text-slate-600 hover:text-slate-300"}`}>
@@ -353,6 +355,16 @@ export default function RydraCoachPage() {
             </div>
           </div>
         )}
+        {/* DIARY TAB */}
+        {tab === "diary" && barber && (
+          <DiaryWidget
+            venueId={VENUE_ID}
+            barberSlug={slug}
+            barberName={barber.name}
+            mode="barber"
+          />
+        )}
+ 
       </div>
     </div>
   );

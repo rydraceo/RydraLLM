@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
+import { DiaryWidget } from "@/app/components/diary-widget";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, ReferenceLine } from "recharts";
  
 const BG   = "bg-[#0A0612]";
@@ -101,7 +102,7 @@ export default function ClientProfilePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [drawer, setDrawer] = useState(false);
-  const [activeTab, setActiveTab] = useState<"overview"|"outreach"|"visits"|"action">("overview");
+  const [activeTab, setActiveTab] = useState<"overview"|"outreach"|"visits"|"action"|"diary">("overview");
   const [localOutreach, setLocalOutreach] = useState<any[]>([]);
   const VENUE_ID = process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID || "e1a6c15d-8ccc-4f58-aefb-8bea46e39918";
  
@@ -253,10 +254,10 @@ export default function ClientProfilePage() {
  
         {/* Tabs */}
         <div className="flex gap-1 mb-5 border-b border-[#2A1852]">
-          {(["overview","outreach","visits","action"] as const).map(tab => (
+          {(["overview","outreach","visits","action","diary"] as const).map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
               className={`px-4 py-2.5 text-xs font-semibold uppercase tracking-wider transition-all capitalize border-b-2 -mb-px ${activeTab === tab ? "border-[#7C3AED] text-[#A78BFA]" : "border-transparent text-slate-600 hover:text-slate-300"}`}>
-              {tab === "action" ? "Action" : tab}
+              {tab === "action" ? "Action" : tab === "diary" ? "Diary" : tab}
             </button>
           ))}
         </div>
@@ -359,6 +360,16 @@ export default function ClientProfilePage() {
             </div>
           </div>
         )}
+        {/* Diary tab */}
+        {activeTab === "diary" && (
+          <DiaryWidget
+            venueId={VENUE_ID}
+            customerId={userId}
+            customerName={c.name}
+            mode="client"
+          />
+        )}
+ 
       </div>
     </div>
   );

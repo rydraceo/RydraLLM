@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { useParams, useRouter } from "next/navigation";
+import { DiaryWidget } from "@/app/components/diary-widget";
  
 const BG   = "bg-[#0A0612]";
 const CARD  = "bg-[#130C24]";
@@ -15,6 +16,8 @@ const NAV = [
   { href: "/merchant/clients",   label: "Clients"   },
   { href: "/merchant/barber",    label: "Barbers", active: true },
 ];
+ 
+const VENUE_ID = process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID || "e1a6c15d-8ccc-4f58-aefb-8bea46e39918";
  
 interface CoachMsg { role: "user"|"assistant"; content: string; }
  
@@ -86,6 +89,18 @@ function MiniCoach({ barber, stats, shopAvg, slug }: { barber: any; stats: any; 
             ))}
           </div>
         </div>
+        {/* ── RydraCoach Diary ── */}
+        {barber && (
+          <div className="mt-5">
+            <DiaryWidget
+              venueId={VENUE_ID}
+              barberSlug={slug}
+              barberName={barber.name}
+              mode="barber"
+            />
+          </div>
+        )}
+ 
       </div>
     </div>
   );
@@ -101,7 +116,6 @@ export default function BarberDashboardPage() {
   const [opportunities, setOpportunities] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const VENUE_ID = process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID || "e1a6c15d-8ccc-4f58-aefb-8bea46e39918";
  
   useEffect(() => {
     if (!slug) return;
