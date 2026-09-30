@@ -1,92 +1,97 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
- 
+import { resolveRecipient, resolveRecipientByPhone, appendOptOut, type SkipReason } from "@/lib/sms/guard";
+
+const HTTP_STATUS: Record<SkipReason, number> = {
+  not_found: 404, invalid_number: 409, opted_out: 409, held: 409, no_optout_token: 500, send_failed: 502,
+};
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const {
-      to,
-      message,
-      customer_name,
-      customer_id,
-      venue_id,
-      markov_state,
-      risk_segment,
-      gap_ratio,
-      days_overdue,
-    } = body;
- 
-    if (!to || !message) {
+    const { customer_id, message, customer_name, venue_id, markov_state, risk_segment, gap_ratio, days_overdue } = body;
+    // "to" is accepted only as a LOOKUP key. It must match a known client's number, and every
+    // opt-out / hold / suppression check still applies. Arbitrary numbers can never be texted.
+
+    if ((!customer_id && !body.to) || typeof message !== "string" || !message.trim()) {
+      return NextResponse.json({ error: "customer_id (or a client's phone number) and message are required" }, { status: 400 });
+    }
+    if (/[^\x20-\x7E\n]/.test(message)) {
+      return NextResponse.json({ error: "Message contains unsupported characters. Use plain text only." }, { status: 400 });
+    }
+
+    const username = process.env.CLICKSEND_USERNAME;
+    const apiKey = process.env.CLICKSEND_API_KEY;
+    if (!username || !apiKey) {
+      return NextResponse.json({ error: "Missing CLICKSEND_USERNAME or CLICKSEND_API_KEY in environment" }, { status: 503 });
+    }
+
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    // ── Guard: opt-out, hold, valid AU mobile, suppression list ─────────────
+    const r = customer_id
+      ? await resolveRecipient(supabase, String(customer_id))
+      : await resolveRecipientByPhone(supabase, String(body.to ?? ""));
+    if (!r.ok) {
       return NextResponse.json(
-        { error: "to and message are required" },
+        { error: `Not sent: ${r.reason.replace(/_/g, " ")}`, reason: r.reason },
+        { status: HTTP_STATUS[r.reason] ?? 409 }
+      );
+    }
+
+    // ── Double-click protection: same number, last 10 minutes ───────────────
+    const since = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const { data: recent } = await supabase.from("sms_outreach")
+      .select("phone").eq("phone", r.to).neq("status", "failed").gte("sent_at", since).limit(1);
+    if (recent && recent.length > 0) {
+      return NextResponse.json(
+        { error: "A message was already sent to this number in the last 10 minutes.", reason: "recently_sent" },
+        { status: 429 }
+      );
+    }
+
+    // ── Append the mandatory opt-out line, then enforce a single SMS segment ─
+    const finalBody = appendOptOut(message.trim(), r.token);
+    if (!finalBody) {
+      return NextResponse.json({ error: "SMS_OPTOUT_BASE_URL is not configured" }, { status: 503 });
+    }
+    if (finalBody.length > 160) {
+      return NextResponse.json(
+        { error: `Message is ${finalBody.length} characters with the opt-out link. Maximum is 160.`, reason: "too_long" },
         { status: 400 }
       );
     }
- 
-    const username = process.env.CLICKSEND_USERNAME;
-    const apiKey = process.env.CLICKSEND_API_KEY;
- 
-    if (!username || !apiKey) {
-      return NextResponse.json(
-        { error: "Missing CLICKSEND_USERNAME or CLICKSEND_API_KEY in environment" },
-        { status: 503 }
-      );
-    }
- 
-    // Strip ALL non-numeric characters, then normalise to E.164
-    const digits = to.replace(/\D/g, "");
-    let normalised: string;
- 
-    if (digits.startsWith("61") && digits.length === 11) {
-      normalised = "+" + digits;
-    } else if (digits.startsWith("0") && digits.length === 10) {
-      normalised = "+61" + digits.slice(1);
-    } else if (digits.length === 9) {
-      normalised = "+61" + digits;
-    } else {
-      normalised = "+" + digits;
-    }
- 
-    console.log(`[ClickSend] Sending to ${customer_name} (${normalised})`);
- 
+
+    console.log(`[ClickSend] Sending to ${customer_name ?? "customer"} (${r.to})`);
     const credentials = Buffer.from(`${username}:${apiKey}`).toString("base64");
- 
+
     const response = await fetch("https://rest.clicksend.com/v3/sms/send", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Basic ${credentials}`,
-      },
-      body: JSON.stringify({
-        messages: [
-          {
-            source: "api",
-            body: message,
-            to: normalised,
-          },
-        ],
-      }),
+      headers: { "Content-Type": "application/json", Authorization: `Basic ${credentials}` },
+      body: JSON.stringify({ messages: [{ source: "api", body: finalBody, to: r.to }] }),
     });
- 
+
     const data = await response.json();
     console.log("[ClickSend] Raw response:", JSON.stringify(data));
- 
-    const success = response.ok && data.response_code === "SUCCESS";
+
+    // ClickSend can return an overall SUCCESS while the individual message failed
+    // (e.g. INVALID_RECIPIENT), so check the per-message status too.
     const msgResult = data.data?.messages?.[0];
- 
-    // ── Save to Supabase regardless of success/failure ─────────────────────
+    const msgStatus = String(msgResult?.status ?? "");
+    const accepted = /^(SUCCESS|QUEUED|SCHEDULED)/i.test(msgStatus);
+    const success = response.ok && data.response_code === "SUCCESS" && accepted;
+
+    // ── Log every attempt ───────────────────────────────────────────────────
     try {
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!
-      );
- 
       await supabase.from("sms_outreach").insert({
         venue_id: venue_id || process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID,
-        customer_id: customer_id || null,
+        customer_id: r.customerId,
         customer_name: customer_name || null,
-        phone: normalised,
-        message,
+        phone: r.to,
+        message: finalBody,
         status: success ? (msgResult?.status || "sent") : "failed",
         message_id: msgResult?.message_id || null,
         cost: msgResult?.message_price ? parseFloat(msgResult.message_price) : null,
@@ -96,29 +101,23 @@ export async function POST(request: NextRequest) {
         days_overdue: days_overdue || null,
         sent_at: new Date().toISOString(),
       });
- 
-      console.log(`[Outreach] Logged SMS to ${customer_name} — status: ${success ? "sent" : "failed"}`);
     } catch (dbErr) {
-      // Don't fail the whole request if logging fails
       console.error("[Outreach] Failed to log to Supabase:", dbErr);
     }
- 
+
     if (!success) {
       return NextResponse.json(
         {
-          error: data.response_msg || "ClickSend rejected the message",
+          error: !accepted && msgStatus ? `ClickSend status: ${msgStatus}` : (data.response_msg || "ClickSend rejected the message"),
           details: data,
         },
         { status: 400 }
       );
     }
- 
-    console.log(`[ClickSend] Sent to ${customer_name} (${normalised}): status ${msgResult?.status}`);
- 
+
     return NextResponse.json({
       success: true,
       message_id: msgResult?.message_id,
-      to: normalised,
       status: msgResult?.status,
       cost: msgResult?.message_price,
     });

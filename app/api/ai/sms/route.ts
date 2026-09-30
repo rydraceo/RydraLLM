@@ -1,183 +1,176 @@
 import { NextRequest, NextResponse } from "next/server";
- 
+
 // ─── Markov State Logic ───────────────────────────────────────────────────────
- 
+
 type MarkovState = "C" | "X" | "R_at_risk" | "R_on_fence" | "R_loyal";
- 
-function deriveMarkovState(customer: {
-  visits: number;
-  gap_ratio: number;
-  status: string;
-  days_overdue: number;
-}): MarkovState {
+
+function deriveMarkovState(customer: { visits: number; gap_ratio: number; status: string }): MarkovState {
   if (customer.visits <= 1) return "C";
   if (customer.gap_ratio > 2.5 || customer.status === "X") return "X";
   if (customer.gap_ratio > 1.3) return "R_at_risk";
   if (customer.gap_ratio > 1.0) return "R_on_fence";
   return "R_loyal";
 }
- 
+
+// The booking link is added by the server, never written by the model.
+const BOOKING_LINK = (process.env.ALKAMI_BOOKING_URL || "getrydra.com/alkami").replace(/^https?:\/\//, "");
+const DEFAULT_MAX = 102; // body budget: 160 minus the opt-out line
+
 const STATE_STRATEGY: Record<MarkovState, string> = {
-  C: "First-timer follow-up. Critical window is days 35–45 after first visit before the habit breaks. NO discount — just a warm rebook nudge with urgency framing (barber availability). Reference their specific barber if known.",
-  X: "Churned customer (112+ days lapsed). Aggressive win-back required. Use $20–30 discount. Lead with loss aversion — 'We miss you' outperforms discount-first by 2.3x. Include anchoring: show full price then discount. Add scarcity (limited slots).",
-  R_at_risk: "At-risk loyal customer (gap_ratio 1.3–2.5). Send $10–20 discount. High ROI. Use loss aversion framing — focus on 'looking sharp' identity, not the discount. Barber personalisation increases response 3x. Act urgently.",
-  R_on_fence: "On the fence (gap_ratio 1.0–1.3). Gentle reminder ONLY. Do NOT offer a discount — they may rebook without it and you'll destroy margin. Use scarcity and habit prompts. Reference their regular cycle.",
-  R_loyal: "Loyal customer (gap_ratio < 1.0). Appreciation message only. Never offer a discount — they are already coming back. A discount here costs pure margin with zero behaviour change.",
+  C: "First-timer follow-up. The rebook window is days 35-45 after the first visit. Warm rebook nudge with light urgency. No discount.",
+  X: "Lapsed for 112+ days. Win-back tone: 'we miss you'. Mention an offer ONLY if one is provided below.",
+  R_at_risk: "Regular who is overdue. Identity framing ('stay looking sharp'), light scarcity. Mention an offer ONLY if one is provided below.",
+  R_on_fence: "Slightly overdue. Gentle reminder only, tied to their usual cycle. No discount.",
+  R_loyal: "Loyal client. Appreciation only. No discount.",
 };
- 
-// ─── System Prompt ────────────────────────────────────────────────────────────
- 
-const SYSTEM_PROMPT = `You are RydraAI, an SMS copywriter specialising in barbershop customer recovery for Alkami Barbershop in Canberra, Australia.
- 
-You combine Markov chain customer behaviour modelling with behavioural economics to write SMS messages that convert.
- 
-MARKOV CHAIN STATES:
-- C (Completed): First-time customer. Habit-formation window is days 35–45.
-- R (Return): Loyal repeat customer. Sub-states: loyal (gap<1.0), on-fence (1.0–1.3), at-risk (1.3–2.5).
-- X (Churned): Lapsed 112+ days. Requires aggressive win-back.
- 
-BEHAVIOURAL ECONOMICS RULES:
-- Loss aversion: "We miss you" beats "Come back for a discount" by 2.3x conversion
-- Habit formation: Customers who rebook within 50 days have 89% retention
-- Social proof: "Your barber [name] has an opening" → 3x more effective than generic SMS
-- Scarcity: "Only 2 slots left this week" drives urgency without discounting
-- Anchoring: Always show "$70 service, $20 off = $50" NOT just "$50 special"
-- Peak-end rule: Send at 11am–2pm (40% higher response than 6pm–9pm)
-- Identity framing: "Stay looking sharp" beats "Book now" — ties to self-image
- 
-DISCOUNT RULES (CRITICAL):
-- gap_ratio < 1.0 (loyal): NEVER discount. They're already coming back.
-- gap_ratio 1.0–1.3 (on fence): NO discount. Gentle nudge only.
-- gap_ratio 1.3–2.5 (at risk): $10–20 discount. High ROI.
-- gap_ratio > 2.5 (churned): $20–30 win-back offer.
-- First timers (C state): NO discount. Just rebook prompt.
- 
-ALKAMI BARBERSHOP CONTEXT:
-- Location: Canberra, Australia
-- Average service: $70 (haircut + beard trim)
-- Profit margin: 60% ($42 per service)
-- Average visit cycle: 45 days (6 weeks)
-- Churn threshold: 112 days
-- Best rebook window: 38–42 days after last visit
-- Peak booking: Thursday–Saturday 10am–4pm
-- Booking link: [Rydra booking link]
- 
-SMS COPY RULES (NON-NEGOTIABLE):
-- MAXIMUM 160 characters (count carefully)
-- Australian English — casual and warm, not corporate
-- Always include the customer's first name
-- Include a clear call to action (reply BOOK, tap link, or call)
-- Personalise with specific data (days since visit, their regular barber if known)
-- Good: "Hey Jack! 6 weeks since your last trim. Dave has a slot this Sat — lock it in: [link]"
-- Bad: "Get 20% off your next visit! Limited time offer."
-- Do not use exclamation marks more than once
-- Do not include emoji (poor deliverability on some carriers)
- 
-RESPONSE FORMAT:
-Return ONLY a raw SMS message. No explanation, no preamble, no quotes around it. Just the message text itself. Maximum 160 characters.`;
- 
+
+// ─── Prompt ───────────────────────────────────────────────────────────────────
+
+const SYSTEM_PROMPT = `You write single SMS messages for Alkami Barbershop in Canberra, Australia.
+
+STYLE
+- Australian English. Casual, warm, not corporate.
+- Address the customer by first name. Mention "Alkami" once.
+- Identity framing ("stay looking sharp") beats "book now". Light scarcity is fine ("spots this week").
+- At most one exclamation mark. No emoji. Plain ASCII characters only.
+
+HARD RULES
+- Do NOT include any link, URL, phone number or placeholder. A booking link is added automatically after your text.
+- Do NOT ask the customer to reply, text back or call.
+- Do NOT state statistics, prices, percentages or discounts, except an offer explicitly provided in the request.
+- Do NOT invent barber names, slots or availability you were not given.
+- Maximum length is given in the request. Count carefully.
+
+OUTPUT
+Return ONLY the message text. No quotes, no preamble, no explanation.`;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const ascii = (s: string) =>
+  s.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/[\u2013\u2014]/g, "-")
+   .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+   .replace(/[^\x20-\x7E]/g, "").replace(/\s+/g, " ").trim();
+
+const clean = (s: string) => ascii(s).replace(/^["'`]+|["'`]+$/g, "").trim();
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+function problems(t: string, firstName: string | null, copyMax: number, offer: string): string[] {
+  const p: string[] = [];
+  if (!t) p.push("empty message");
+  if (t.length > copyMax) p.push(`over ${copyMax} characters (was ${t.length})`);
+  if (firstName && !new RegExp(`\\b${esc(firstName)}\\b`, "i").test(t)) p.push(`must use the first name "${firstName}"`);
+  if (!/alkami/i.test(t)) p.push('must mention "Alkami"');
+  if (/[\[\]{}<>]|https?:|www\.|\.com/i.test(t)) p.push("no links or placeholders (a link is added automatically)");
+  if (/\breply\b|text back|call us/i.test(t)) p.push("do not ask them to reply or call");
+  if (!offer && /[$%]|\bdiscount\b|\boff\b|\bfree\b/i.test(t)) p.push("no prices, discounts or offers");
+  if (offer && (t.match(/\$\d+/g) || []).some((x) => !offer.includes(x))) p.push("only mention the provided offer");
+  if ((t.match(/!/g) || []).length > 1) p.push("at most one exclamation mark");
+  return p;
+}
+
+function fallbackMessage(state: MarkovState, name: string | null): string {
+  const n = (name || "there").slice(0, 12);
+  switch (state) {
+    case "C": return `Hi ${n}, Alkami here. Ready for your next cut? Book a spot:`;
+    case "X": return `Hi ${n}, we miss you at Alkami. Grab a spot this week:`;
+    case "R_at_risk": return `Hi ${n}, it's been a while! Alkami has spots this week:`;
+    case "R_on_fence": return `Hi ${n}, time for a fresh cut? Alkami has spots open:`;
+    default: return `Thanks for backing Alkami, ${n}. Book your next cut here:`;
+  }
+}
+
+async function callModel(system: string, user: string): Promise<string> {
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (openaiKey) {
+    try {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [{ role: "system", content: system }, { role: "user", content: user }],
+          max_tokens: 80, temperature: 0.7,
+        }),
+      });
+      if (!res.ok) throw new Error(`OpenAI error: ${res.status}`);
+      const data = await res.json();
+      return String(data.choices[0].message.content ?? "");
+    } catch (err) {
+      console.error("[SMS AI] OpenAI failed, trying Anthropic:", err);
+    }
+  }
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (!anthropicKey) throw new Error("No AI keys configured");
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 80, system, messages: [{ role: "user", content: user }] }),
+  });
+  if (!res.ok) throw new Error(`Anthropic error: ${res.status}`);
+  const data = await res.json();
+  return String(data.content[0].text ?? "");
+}
+
 // ─── Handler ──────────────────────────────────────────────────────────────────
- 
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { customer } = body;
- 
-    if (!customer) {
-      return NextResponse.json({ error: "customer is required" }, { status: 400 });
+    if (!customer) return NextResponse.json({ error: "customer is required" }, { status: 400 });
+
+    // Courtesy check only. The send route is what actually enforces blocking.
+    if (customer.sms_blocked) {
+      return NextResponse.json({ error: "This client cannot be messaged.", reason: customer.sms_status ?? "blocked" }, { status: 409 });
     }
- 
-    const markovState = deriveMarkovState(customer);
-    const strategy = STATE_STRATEGY[markovState];
- 
-    const weeksOverdue = Math.round(customer.days_overdue / 7);
-    const firstName = customer.name?.split(" ")[0] || customer.name;
- 
-    const userPrompt = `Write an SMS for this specific Alkami Barbershop customer:
- 
-Customer: ${customer.name} (first name: ${firstName})
-Phone: ${customer.phone}
-Markov State: ${markovState}
-Gap Ratio: ${customer.gap_ratio.toFixed(2)}x
-Days Since Last Visit: ${customer.days_overdue} days (approx ${weeksOverdue} weeks)
-Total Visits: ${customer.visits}
-CLV: $${customer.potential_value}
-Churn Score: ${customer.churn_score ? (customer.churn_score * 10).toFixed(1) + "/10" : "unknown"}
-Risk Segment: ${customer.risk_segment}
- 
-STRATEGY FOR THIS CUSTOMER:
-${strategy}
- 
-Write the SMS now. Remember: maximum 160 characters, Australian English, use first name (${firstName}), clear CTA. Return ONLY the message text.`;
- 
-    // ── OpenAI Primary ──────────────────────────────────────────────────────
-    const openaiKey = process.env.OPENAI_API_KEY;
- 
-    if (openaiKey) {
-      try {
-        const response = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${openaiKey}`,
-          },
-          body: JSON.stringify({
-            model: "gpt-4o-mini",
-            messages: [
-              { role: "system", content: SYSTEM_PROMPT },
-              { role: "user", content: userPrompt },
-            ],
-            max_tokens: 100,
-            temperature: 0.7,
-          }),
-        });
- 
-        if (!response.ok) throw new Error(`OpenAI error: ${response.status}`);
-        const data = await response.json();
-        const message = data.choices[0].message.content.trim();
- 
-        return NextResponse.json({
-          message,
-          markov_state: markovState,
-          strategy,
-          char_count: message.length,
-        });
-      } catch (err) {
-        console.error("[SMS AI] OpenAI failed, trying Anthropic:", err);
+
+    const visits = Number(customer.visits) || 0;
+    const gap = Number(customer.gap_ratio) || 0;
+    const daysOverdue = Math.max(0, Number(customer.days_overdue) || 0);
+    const state = deriveMarkovState({ visits, gap_ratio: gap, status: String(customer.status ?? "") });
+    const strategy = STATE_STRATEGY[state];
+
+    const rawFirst = ascii(String(customer.name ?? "")).split(" ")[0].replace(/[^A-Za-z'\-]/g, "");
+    const firstName = rawFirst.length >= 2 ? rawFirst.slice(0, 20) : null;
+
+    const offerRaw = typeof body.offer === "string" ? ascii(body.offer) : "";
+    const offer = /^\$\d{1,3} off$/i.test(offerRaw) ? offerRaw : "";
+
+    const maxTotal = Math.min(Math.max(Number(body.max_chars) || DEFAULT_MAX, 60), 140);
+    const copyMax = maxTotal - BOOKING_LINK.length - 1; // room for " " + link
+
+    const userPrompt = `Write one SMS for an Alkami Barbershop customer.
+
+First name: ${firstName ?? "(unknown - open with 'Hi there')"}
+Client type: ${state}
+Days since last visit: ${daysOverdue} (about ${Math.round(daysOverdue / 7)} weeks)
+Total visits: ${visits}
+Offer you may mention: ${offer || "NONE - do not mention any discount, price or offer"}
+
+Strategy: ${strategy}
+
+Maximum ${copyMax} characters. Do not include a link. Return only the message.`;
+
+    let text = "";
+    let source: "ai" | "fallback" = "ai";
+    try {
+      text = clean(await callModel(SYSTEM_PROMPT, userPrompt));
+      let issues = problems(text, firstName, copyMax, offer);
+      if (issues.length) {
+        const retry = `${userPrompt}\n\nYour previous attempt was rejected: ${issues.join("; ")}.\nPrevious attempt: "${text}"\nRewrite it fixing every issue.`;
+        text = clean(await callModel(SYSTEM_PROMPT, retry));
+        issues = problems(text, firstName, copyMax, offer);
       }
+      if (issues.length) throw new Error(`Rejected after retry: ${issues.join("; ")}`);
+    } catch (err) {
+      console.error("[SMS AI] Using fallback template:", err);
+      text = fallbackMessage(state, firstName);
+      if (text.length > copyMax) text = text.slice(0, copyMax).trimEnd();
+      source = "fallback";
     }
- 
-    // ── Anthropic Fallback ─────────────────────────────────────────────────
-    const anthropicKey = process.env.ANTHROPIC_API_KEY;
-    if (!anthropicKey) {
-      return NextResponse.json({ error: "No AI keys configured" }, { status: 503 });
-    }
- 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": anthropicKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5",
-        max_tokens: 100,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: userPrompt }],
-      }),
-    });
- 
-    if (!response.ok) throw new Error(`Anthropic error: ${response.status}`);
-    const data = await response.json();
-    const message = data.content[0].text.trim();
- 
-    return NextResponse.json({
-      message,
-      markov_state: markovState,
-      strategy,
-      char_count: message.length,
-    });
+
+    const message = `${text} ${BOOKING_LINK}`;
+    return NextResponse.json({ message, markov_state: state, strategy, source, char_count: message.length });
   } catch (error: any) {
     console.error("[SMS AI] Error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

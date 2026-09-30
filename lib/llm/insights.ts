@@ -178,8 +178,7 @@ Generate insights focusing on the HIGHEST revenue opportunities with specific ac
 }
 
 export async function generateInsights(
-  venueId: string
-): Promise<VenueInsights> {
+venueId: string, FAKE_DATA: string): Promise<VenueInsights> {
   console.log(`Generating AI insights for venue: ${venueId}`);
 
   // Fetch real customer data from Supabase

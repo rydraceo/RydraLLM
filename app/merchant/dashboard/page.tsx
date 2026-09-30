@@ -10,10 +10,11 @@ interface Customer {
   potential_value: string; churn_score: number | null; loyalty_score: number | null;
   last_visit: string; avg_gap_days: number; risk_segment: string;
   intervention_recommended: boolean; intervention_value: number; markov_state: string;
+  sms_status?: string; sms_blocked?: boolean;
 }
 interface ChatMessage { role: "user" | "assistant"; content: string; }
 interface Recommendation { title: string; description: string; impact: string; actionLabel: string; confidence?: number; }
-interface Summary { total: number; intervention_ready: number; total_intervention_value: number; }
+interface Summary { total: number; intervention_ready: number; total_intervention_value: number; sms_blocked?: number; sms_status_counts?: Record<string, number>; }
 type MarkovState = "C" | "X" | "R_at_risk" | "R_on_fence" | "R_loyal";
  
 function deriveMarkovState(c: Customer): MarkovState {
@@ -31,6 +32,22 @@ const MARKOV_META: Record<MarkovState, { label: string; strategy: string; discou
   R_on_fence: { label: "On the Fence", strategy: "Gentle nudge only. No discount needed.",              discountRule: "No discount",  hex: "#FBBF24" },
   R_loyal:    { label: "Loyal",        strategy: "Appreciation only. Never discount loyal clients.",    discountRule: "No discount",  hex: "#34D399" },
 };
+ 
+// ─── SMS compliance ───────────────────────────────────────────────────────────
+// The server appends "\nOpt out: <base>/o/<10-char token>" to every message.
+// Reserve = 10 ("\nOpt out: ") + 3 ("/o/") + 10 (token) + length of your base URL.
+// Optionally set NEXT_PUBLIC_SMS_OPTOUT_BASE_URL so this is exact; otherwise a 35-char domain is assumed.
+const OPTOUT_RESERVE = 23 + (process.env.NEXT_PUBLIC_SMS_OPTOUT_BASE_URL?.replace(/^https?:\/\//, "").length ?? 15);
+const SMS_BODY_MAX = 160 - OPTOUT_RESERVE;
+ 
+const SMS_STATUS_META: Record<string, { label: string; color: string; reason: string }> = {
+  ok:             { label: "Messageable",     color: "#34D399", reason: "Can be messaged." },
+  held:           { label: "On hold",         color: "#FBBF24", reason: "Identity match needs a manual check against Fresha before this client can be messaged." },
+  opted_out:      { label: "Opted out",       color: "#F43F5E", reason: "This client has unsubscribed and cannot be messaged." },
+  invalid_number: { label: "No valid mobile", color: "#FB923C", reason: "No Australian mobile number on file." },
+  unknown:        { label: "Unverified",      color: "#FB923C", reason: "SMS status could not be verified, so sending is blocked." },
+};
+const SMS_STATUS_ORDER = ["ok", "held", "invalid_number", "opted_out", "unknown"] as const;
  
 // ─── Royal Intelligence Design Tokens ─────────────────────────────────────────
 const BG    = "bg-[#0A0612]";
@@ -79,6 +96,18 @@ function ConfBar({ pct }: { pct: number }) {
 function IVBadge({ value }: { value: number }) {
   if (value <= 0) return <span className="text-[#2A1852] text-xs">—</span>;
   return <div className="text-right"><div className="text-xs font-bold" style={{ color: GOLD }}>+${value.toFixed(2)}</div><div className="text-[9px] uppercase tracking-wider mt-0.5" style={{ color: "#6B5C8A" }}>ΔV</div></div>;
+}
+ 
+// ─── SMS status badge ─────────────────────────────────────────────────────────
+function SmsBadge({ c }: { c: Customer }) {
+  if (!c.sms_blocked) return null;
+  const m = SMS_STATUS_META[c.sms_status ?? "unknown"] ?? SMS_STATUS_META.unknown;
+  return (
+    <span title={m.reason} className="ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider align-middle"
+      style={{ color: m.color, background: `${m.color}15`, border: `1px solid ${m.color}30` }}>
+      {m.label}
+    </span>
+  );
 }
  
 // ─── Morning Brief ────────────────────────────────────────────────────────────
@@ -149,18 +178,47 @@ function MorningBrief({ venueId }: { venueId: string }) {
 function SmsDrawer({ customer, onClose }: { customer: Customer; onClose: () => void }) {
   const [smsText, setSmsText] = useState(""); const [generating, setGenerating] = useState(false);
   const [sending, setSending] = useState(false); const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
   const markovState = deriveMarkovState(customer); const meta = MARKOV_META[markovState];
   const charCount = smsText.length;
+  const blocked = !!customer.sms_blocked;
+  const statusMeta = SMS_STATUS_META[customer.sms_status ?? "unknown"] ?? SMS_STATUS_META.unknown;
+ 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
  
   async function generateSMS() {
-    setGenerating(true);
-    try { const res = await fetch("/api/ai/sms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customer }) }); const data = await res.json(); setSmsText(data.message || ""); }
-    catch {} finally { setGenerating(false); }
+    if (blocked) return;
+    setGenerating(true); setError("");
+    try {
+      const res = await fetch("/api/ai/sms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customer, max_chars: SMS_BODY_MAX }) });
+      const data = await res.json();
+      setSmsText((data.message || "").slice(0, SMS_BODY_MAX));
+    }
+    catch { setError("Could not generate a message. Try again."); } finally { setGenerating(false); }
   }
+  // NOTE: the phone number is deliberately NOT sent from the browser. The server looks it up
+  // from customer_id and re-checks opt-out / hold status before sending.
   async function sendSMS() {
-    if (!smsText.trim()) return; setSending(true);
-    try { const res = await fetch("/api/sms/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: customer.phone, message: smsText, customer_name: customer.name, customer_id: customer.user_id, venue_id: process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID, markov_state: markovState, risk_segment: customer.risk_segment, gap_ratio: customer.gap_ratio, days_overdue: customer.days_overdue }) }); if (res.ok) { setSent(true); setTimeout(onClose, 1800); } }
-    catch {} finally { setSending(false); }
+    if (blocked || !smsText.trim() || charCount > SMS_BODY_MAX) return;
+    setSending(true); setError("");
+    try {
+      const res = await fetch("/api/sms/send", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: smsText, customer_name: customer.name, customer_id: customer.user_id,
+          venue_id: process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID, markov_state: markovState,
+          risk_segment: customer.risk_segment, gap_ratio: customer.gap_ratio, days_overdue: customer.days_overdue,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) { setSent(true); setTimeout(onClose, 1800); }
+      else setError(data.reason ? `Not sent: ${String(data.reason).replace(/_/g, " ")}` : data.error || "Send failed");
+    } catch { setError("Network error. Message not sent."); }
+    finally { setSending(false); }
   }
  
   return (
@@ -170,7 +228,7 @@ function SmsDrawer({ customer, onClose }: { customer: Customer; onClose: () => v
         <div className="flex items-center justify-between px-6 py-4 flex-shrink-0" style={{ borderBottom: "1px solid #2A1852" }}>
           <div>
             <div className="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style={{ color: "#6B5C8A" }}>Compose SMS</div>
-            <div className="text-sm font-semibold text-white">{customer.name}</div>
+            <div className="text-sm font-semibold text-white">{customer.name}<SmsBadge c={customer} /></div>
             <div className="text-xs" style={{ color: "#6B5C8A" }}>{customer.phone}</div>
           </div>
           <button onClick={onClose} className="w-7 h-7 rounded-md flex items-center justify-center transition-all" style={{ border: "1px solid #2A1852", background: "#1A1030", color: "#A78BFA" }}>
@@ -178,6 +236,12 @@ function SmsDrawer({ customer, onClose }: { customer: Customer; onClose: () => v
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-6">
+          {blocked && (
+            <div className="rounded-lg p-4 mb-5 border" style={{ background: `${statusMeta.color}10`, borderColor: `${statusMeta.color}40` }}>
+              <div className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: statusMeta.color }}>SMS blocked · {statusMeta.label}</div>
+              <p className="text-xs" style={{ color: "#C4B5FD" }}>{statusMeta.reason}</p>
+            </div>
+          )}
           <div className="rounded-lg p-4 mb-5 border" style={{ background: `${meta.hex}08`, borderColor: `${meta.hex}30` }}>
             <div className="flex items-center justify-between mb-2">
               <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: meta.hex }}>{meta.label} Strategy</div>
@@ -192,16 +256,16 @@ function SmsDrawer({ customer, onClose }: { customer: Customer; onClose: () => v
           </div>
           <div className="mb-2 flex items-center justify-between">
             <div className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "#6B5C8A" }}>Message</div>
-            <span className="text-[10px] font-mono" style={{ color: charCount > 160 ? "#F43F5E" : charCount > 140 ? "#FBBF24" : "#6B5C8A" }}>{charCount}/160</span>
+            <span className="text-[10px] font-mono" style={{ color: charCount > SMS_BODY_MAX ? "#F43F5E" : charCount > SMS_BODY_MAX - 15 ? "#FBBF24" : "#6B5C8A" }}>{charCount}/{SMS_BODY_MAX} + opt-out link</span>
           </div>
-          <textarea value={smsText} onChange={e => setSmsText(e.target.value)} rows={5} maxLength={320}
-            className="w-full rounded-lg px-4 py-3 text-sm text-white resize-none focus:outline-none transition-all"
+          <textarea value={smsText} onChange={e => setSmsText(e.target.value)} rows={5} maxLength={SMS_BODY_MAX} disabled={blocked}
+            className="w-full rounded-lg px-4 py-3 text-sm text-white resize-none focus:outline-none transition-all disabled:opacity-40"
             style={{ background: "#0F0A1E", border: "1px solid #2A1852" }}
-            placeholder={`Write to ${customer.name.split(" ")[0]}...`} />
+            placeholder={blocked ? "This client cannot be messaged." : `Write to ${customer.name.split(" ")[0]}...`} />
           <div className="mt-1.5 h-[2px] rounded-full overflow-hidden" style={{ background: "#2A1852" }}>
-            <div className="h-full rounded-full transition-all" style={{ width: `${Math.min((charCount/160)*100,100)}%`, background: charCount > 160 ? "#F43F5E" : PUR_L }} />
+            <div className="h-full rounded-full transition-all" style={{ width: `${Math.min((charCount / SMS_BODY_MAX) * 100, 100)}%`, background: charCount > SMS_BODY_MAX ? "#F43F5E" : PUR_L }} />
           </div>
-          <button onClick={generateSMS} disabled={generating}
+          <button onClick={generateSMS} disabled={generating || blocked}
             className="w-full mt-3 py-2.5 rounded-lg text-[11px] font-semibold uppercase tracking-wider transition-all flex items-center justify-center gap-2 disabled:opacity-40"
             style={{ background: "rgba(91,33,182,0.15)", border: "1px solid rgba(91,33,182,0.35)", color: PUR_LL }}>
             {generating ? <><div className="w-3.5 h-3.5 border rounded-full animate-spin" style={{ borderColor: "rgba(167,139,250,0.3)", borderTopColor: PUR_LL }} />Generating...</> : "✦ Write with AI"}
@@ -209,11 +273,17 @@ function SmsDrawer({ customer, onClose }: { customer: Customer; onClose: () => v
           {smsText && (
             <div className="mt-4 rounded-lg p-4 border" style={{ background: "#0F0A1E", borderColor: "#2A1852" }}>
               <div className="text-[10px] uppercase tracking-wider mb-2" style={{ color: "#6B5C8A" }}>Preview</div>
-              <div className="flex justify-end"><div className="max-w-[80%] rounded-2xl rounded-tr-sm px-3 py-2" style={{ background: PUR }}><p className="text-white text-xs leading-relaxed">{smsText}</p></div></div>
+              <div className="flex justify-end">
+                <div className="max-w-[80%] rounded-2xl rounded-tr-sm px-3 py-2" style={{ background: PUR }}>
+                  <p className="text-white text-xs leading-relaxed">{smsText}</p>
+                  <p className="text-white/60 text-[10px] leading-relaxed mt-1.5">Opt out: link added automatically</p>
+                </div>
+              </div>
             </div>
           )}
         </div>
         <div className="flex-shrink-0 px-6 py-4" style={{ borderTop: "1px solid #2A1852" }}>
+          {error && <div className="mb-3 text-xs text-rose-400">{error}</div>}
           {sent ? (
             <div className="flex items-center justify-center gap-2 py-3 rounded-lg border" style={{ background: "rgba(52,211,153,0.06)", borderColor: "rgba(52,211,153,0.25)" }}>
               <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
@@ -222,10 +292,10 @@ function SmsDrawer({ customer, onClose }: { customer: Customer; onClose: () => v
           ) : (
             <div className="flex gap-2">
               <button onClick={onClose} className="flex-1 py-2.5 rounded-lg text-sm border transition-all" style={{ borderColor: "#2A1852", color: "#A78BFA" }}>Cancel</button>
-              <button onClick={sendSMS} disabled={!smsText.trim() || charCount > 160 || sending || !customer.phone || customer.phone === "No phone"}
+              <button onClick={sendSMS} disabled={blocked || !smsText.trim() || charCount > SMS_BODY_MAX || sending}
                 className="flex-[2] py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-40 flex items-center justify-center gap-2 transition-all"
                 style={{ background: PUR, boxShadow: "0 4px 20px rgba(212,160,23,0.12)" }}>
-                {sending ? <><div className="w-3.5 h-3.5 border border-white/30 border-t-white rounded-full animate-spin" />Sending...</> : "Send SMS"}
+                {sending ? <><div className="w-3.5 h-3.5 border border-white/30 border-t-white rounded-full animate-spin" />Sending...</> : blocked ? "SMS blocked" : "Send SMS"}
               </button>
             </div>
           )}
@@ -263,8 +333,10 @@ export default function DashboardPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [search, setSearch] = useState("");
   const [filterSeg, setFilterSeg] = useState("all");
+  const [filterSms, setFilterSms] = useState("all");
   const [curPage, setCurPage] = useState(1);
   const [perPage, setPerPage] = useState(50);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -276,7 +348,17 @@ export default function DashboardPage() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const VENUE_ID = process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID || "e1a6c15d-8ccc-4f58-aefb-8bea46e39918";
  
-  useEffect(() => { fetch(`/api/intelligence/at-risk-customers?venue_id=${VENUE_ID}`).then(r => r.json()).then(d => { setCustomers(d.customers || []); setSummary(d.summary || null); }).catch(console.error).finally(() => setLoading(false)); }, []);
+  useEffect(() => {
+    fetch(`/api/intelligence/at-risk-customers?venue_id=${VENUE_ID}`)
+      .then(async r => {
+        const d = await r.json();
+        if (!r.ok || d.error) throw new Error(d.details || d.error || "Failed to load customers");
+        setCustomers(d.customers || []);
+        setSummary(d.summary || null);
+      })
+      .catch(e => { console.error(e); setLoadError(e.message || "Failed to load customers"); })
+      .finally(() => setLoading(false));
+  }, []);
   useEffect(() => { if (customers.length > 0 && recs.length === 0) generateRecs(); }, [customers]);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chat, chatLoading]);
  
@@ -308,6 +390,9 @@ export default function DashboardPage() {
   const avgChurn   = customers.reduce((s, c) => s + (c.churn_score || 0), 0) / n;
   const avgGap     = customers.reduce((s, c) => s + c.gap_ratio, 0) / n;
   const totalIV    = summary?.total_intervention_value ?? customers.reduce((s, c) => s + (c.intervention_value || 0), 0);
+  const smsBlocked = customers.filter(c => c.sms_blocked).length;
+  const smsOk = customers.length - smsBlocked;
+  const smsCounts = customers.reduce<Record<string, number>>((a, c) => { const k = c.sms_status ?? "unknown"; a[k] = (a[k] ?? 0) + 1; return a; }, {});
  
   const riskData = [{ name: "At Risk", value: atRisk.length, color: "#F43F5E" }, { name: "On Fence", value: onFence.length, color: PUR_L }, { name: "Loyal", value: loyal.length, color: "#34D399" }];
   const gapData  = [{ r: "0–0.5", n: customers.filter(c => c.gap_ratio <= 0.5).length }, { r: "0.5–1", n: customers.filter(c => c.gap_ratio > 0.5 && c.gap_ratio <= 1).length }, { r: "1–1.5", n: customers.filter(c => c.gap_ratio > 1 && c.gap_ratio <= 1.5).length }, { r: "1.5–2", n: customers.filter(c => c.gap_ratio > 1.5 && c.gap_ratio <= 2).length }, { r: "2+", n: customers.filter(c => c.gap_ratio > 2).length }];
@@ -316,12 +401,14 @@ export default function DashboardPage() {
   const filtered = useMemo(() => {
     let f = customers.filter(c => c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search) || (c.email && c.email.toLowerCase().includes(search.toLowerCase())));
     if (filterSeg !== "all") f = f.filter(c => c.risk_segment === filterSeg);
-    return f;
-  }, [customers, search, filterSeg]);
+    if (filterSms === "blocked") f = f.filter(c => c.sms_blocked);
+    else if (filterSms !== "all") f = f.filter(c => (c.sms_status ?? "unknown") === filterSms);
+    return [...f].sort((a, b) => b.intervention_value - a.intervention_value);
+  }, [customers, search, filterSeg, filterSms]);
  
   const paginated  = useMemo(() => filtered.slice((curPage - 1) * perPage, curPage * perPage), [filtered, curPage, perPage]);
   const totalPages = Math.ceil(filtered.length / perPage);
-  useEffect(() => setCurPage(1), [search, filterSeg]);
+  useEffect(() => setCurPage(1), [search, filterSeg, filterSms]);
  
   const riskColor = (g: number) => g > 1.5 ? "#F43F5E" : g > 0.5 ? "#FB923C" : "#34D399";
   const riskLabel = (g: number) => g > 1.5 ? "Critical" : g > 0.5 ? "At Risk" : "Stable";
@@ -375,6 +462,14 @@ export default function DashboardPage() {
  
       <div className="max-w-[1800px] mx-auto px-8 py-8">
  
+        {/* ── Load error ── */}
+        {loadError && (
+          <div className="rounded-xl border px-5 py-4 mb-6" style={{ background: "rgba(244,63,94,0.08)", borderColor: "rgba(244,63,94,0.35)" }}>
+            <div className="text-[10px] font-bold uppercase tracking-widest mb-1 text-rose-400">Could not load clients</div>
+            <p className="text-xs" style={{ color: "#C4B5FD" }}>{loadError}</p>
+          </div>
+        )}
+ 
         {/* ── Page title ── */}
         <div className="flex items-center justify-between mb-8">
           <div>
@@ -389,12 +484,12 @@ export default function DashboardPage() {
         </div>
  
         {/* ── KPI Cards ── */}
-        <div className="grid grid-cols-5 gap-4 mb-8">
+        <div className="grid grid-cols-5 gap-4 mb-4">
           {[
             { label: "Total Clients",      value: customers.length.toLocaleString(), sub: `${atRisk.length.toLocaleString()} critical`,                                       accent: PUR_L },
             { label: "Client Value",       value: `$${(totalValue/1000).toFixed(0)}k`,   sub: "Total customer CLV",                                                           accent: GOLD },
             { label: "Avg Gap Ratio",      value: `${avgGap.toFixed(2)}×`,              sub: "Overdue multiplier",                                                            accent: GOLD2 },
-            { label: "Intervention Value", value: `$${totalIV.toLocaleString(undefined,{maximumFractionDigits:0})}`, sub: "ΔV across all clients",                            accent: GOLD },
+            { label: "Intervention Value", value: `$${totalIV.toLocaleString(undefined,{maximumFractionDigits:0})}`, sub: `${smsOk.toLocaleString()} messageable · ${smsBlocked.toLocaleString()} blocked`, accent: GOLD },
             { label: "Avg Churn Risk",     value: `${(avgChurn * 10).toFixed(1)}`,       sub: "/10 churn probability",                                                        accent: "#F43F5E" },
           ].map(({ label, value, sub, accent }) => (
             <div key={label} className={`${CARD} border ${BDR} rounded-xl p-5 relative overflow-hidden hover:border-[#3A2268] transition-all`}>
@@ -406,6 +501,23 @@ export default function DashboardPage() {
               </div>
             </div>
           ))}
+        </div>
+ 
+        {/* ── SMS eligibility strip (click a pill to filter the client table) ── */}
+        <div className="flex flex-wrap items-center gap-2 mb-8">
+          <span className="text-[10px] font-semibold uppercase tracking-widest mr-1" style={{ color: "#6B5C8A" }}>SMS eligibility</span>
+          {SMS_STATUS_ORDER.filter(k => k === "ok" || k === "opted_out" || (smsCounts[k] ?? 0) > 0).map(k => {
+            const m = SMS_STATUS_META[k];
+            const active = filterSms === k;
+            return (
+              <button key={k} onClick={() => { setFilterSms(active ? "all" : k); document.getElementById("client-table")?.scrollIntoView({ behavior: "smooth" }); }}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-semibold uppercase tracking-wider transition-all"
+                style={{ color: m.color, background: active ? `${m.color}25` : `${m.color}10`, border: `1px solid ${m.color}${active ? "70" : "30"}` }}>
+                <span>{m.label}</span>
+                <span className="text-white">{(smsCounts[k] ?? 0).toLocaleString()}</span>
+              </button>
+            );
+          })}
         </div>
  
         {/* ── Revenue Recovery ── */}
@@ -604,7 +716,7 @@ export default function DashboardPage() {
         </div>
  
         {/* ── Search & Table ── */}
-        <div className="flex gap-3 mb-4">
+        <div id="client-table" className="flex gap-3 mb-4 scroll-mt-20">
           <input type="text" placeholder="Search clients by name, phone, or email..." value={search} onChange={e => setSearch(e.target.value)}
             className="flex-1 rounded-md px-4 py-2 text-sm text-white placeholder-[#6B5C8A] focus:outline-none transition-all"
             style={{ background: "#0F0A1E", border: "1px solid #2A1852" }} />
@@ -615,6 +727,16 @@ export default function DashboardPage() {
             <option value="Churned">Churned</option>
             <option value="At Risk">At Risk</option>
             <option value="Stable">Stable</option>
+          </select>
+          <select value={filterSms} onChange={e => setFilterSms(e.target.value)}
+            className="rounded-md px-4 py-2 text-sm focus:outline-none border cursor-pointer"
+            style={{ background: "#0F0A1E", borderColor: "#2A1852", color: "#C4B5FD" }}>
+            <option value="all">All SMS status</option>
+            <option value="ok">Messageable ({smsCounts.ok ?? 0})</option>
+            <option value="blocked">All blocked ({smsBlocked})</option>
+            <option value="held">On hold ({smsCounts.held ?? 0})</option>
+            <option value="invalid_number">No valid mobile ({smsCounts.invalid_number ?? 0})</option>
+            <option value="opted_out">Opted out ({smsCounts.opted_out ?? 0})</option>
           </select>
         </div>
         <div className="text-[10px] mb-3 uppercase tracking-wider" style={{ color: "#6B5C8A" }}>{filtered.length.toLocaleString()} clients · sorted by intervention value</div>
@@ -638,7 +760,7 @@ export default function DashboardPage() {
                           {c.name.split(" ").map(n => n[0]).slice(0,2).join("").toUpperCase()}
                         </div>
                         <div>
-                          <div className="text-sm text-white font-medium">{c.name}</div>
+                          <div className="text-sm text-white font-medium">{c.name}<SmsBadge c={c} /></div>
                           <div className="text-[10px]" style={{ color: "#6B5C8A" }}>{c.phone || "No phone"}</div>
                         </div>
                       </div>
@@ -655,11 +777,19 @@ export default function DashboardPage() {
                     <td className="px-5 py-3.5 text-right text-sm font-medium" style={{ color: GOLD }}>${c.potential_value}</td>
                     <td className="px-5 py-3.5 text-right"><IVBadge value={c.intervention_value} /></td>
                     <td className="px-5 py-3.5 text-right">
-                      <button onClick={() => setSelectedCustomer(c)}
-                        className="px-3 py-1.5 rounded-md text-[10px] font-semibold uppercase tracking-wider transition-all opacity-0 group-hover:opacity-100"
-                        style={{ background: "rgba(91,33,182,0.15)", border: "1px solid rgba(91,33,182,0.35)", color: PUR_LL }}>
-                        SMS
-                      </button>
+                      {c.sms_blocked ? (
+                        <span title={(SMS_STATUS_META[c.sms_status ?? "unknown"] ?? SMS_STATUS_META.unknown).reason}
+                          className="inline-block px-3 py-1.5 rounded-md text-[10px] font-semibold uppercase tracking-wider cursor-not-allowed"
+                          style={{ background: "rgba(107,92,138,0.12)", border: "1px solid rgba(107,92,138,0.3)", color: "#6B5C8A" }}>
+                          Blocked
+                        </span>
+                      ) : (
+                        <button onClick={() => setSelectedCustomer(c)}
+                          className="px-3 py-1.5 rounded-md text-[10px] font-semibold uppercase tracking-wider transition-all opacity-0 group-hover:opacity-100"
+                          style={{ background: "rgba(91,33,182,0.15)", border: "1px solid rgba(91,33,182,0.35)", color: PUR_LL }}>
+                          SMS
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
