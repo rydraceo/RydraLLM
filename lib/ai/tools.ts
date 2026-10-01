@@ -116,10 +116,10 @@ const PAGES: Record<string, { path: string; label: string }> = {
   barbers: { path: "/merchant/barber", label: "Barbers" },
 };
 
-const ascii = (s: string) =>
+export const ascii = (s: string) =>
   s.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/[\u2013\u2014]/g, "-").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, "").replace(/\s+/g, " ").trim();
 
-function messageProblem(msg: string): string | null {
+export function messageProblem(msg: string): string | null {
   if (!msg) return "message is empty";
   if (msg.length > 80) return `message is ${msg.length} characters; the limit is 80`;
   if (/https?:|www\.|\.com|\.app|\[|\]/i.test(msg)) return "message must not contain links or placeholders other than {first_name}";

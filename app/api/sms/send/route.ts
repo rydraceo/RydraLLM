@@ -53,6 +53,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // ── Daily limit + cooldown (server-side: the browser cannot bypass these) ───
+    const venueKey = process.env.ALKAMI_VENUE_ID || process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID;
+    const cap = Math.max(1, parseInt(process.env.SMS_DAILY_CAP ?? "50", 10) || 50);
+    if (venueKey) {
+      const since24 = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { count: sent24 } = await supabase.from("sms_outreach")
+        .select("phone", { count: "exact", head: true })
+        .eq("venue_id", venueKey).neq("status", "failed").gte("sent_at", since24);
+      if ((sent24 ?? 0) >= cap) {
+        return NextResponse.json({ error: `Daily limit of ${cap} texts reached. Try again tomorrow.`, reason: "daily_cap" }, { status: 429 });
+      }
+    }
+    if (body.bulk === true) {
+      const coolDays = Math.max(0, parseInt(process.env.SMS_COOLDOWN_DAYS ?? "7", 10) || 7);
+      const sinceCool = new Date(Date.now() - coolDays * 24 * 60 * 60 * 1000).toISOString();
+      const { data: cooled } = await supabase.from("sms_outreach")
+        .select("phone").eq("customer_id", r.customerId).neq("status", "failed").gte("sent_at", sinceCool).limit(1);
+      if (cooled && cooled.length > 0) {
+        return NextResponse.json({ error: `This client was texted in the last ${coolDays} days.`, reason: "cooldown" }, { status: 429 });
+      }
+    }
+
     // ── Append the mandatory opt-out line, then enforce a single SMS segment ─
     const finalBody = appendOptOut(message.trim(), r.token);
     if (!finalBody) {
@@ -87,7 +109,7 @@ export async function POST(request: NextRequest) {
     // ── Log every attempt ───────────────────────────────────────────────────
     try {
       await supabase.from("sms_outreach").insert({
-        venue_id: venue_id || process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID,
+        venue_id: venueKey || venue_id,
         customer_id: r.customerId,
         customer_name: customer_name || null,
         phone: r.to,

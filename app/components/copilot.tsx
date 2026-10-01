@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { FxStyles } from "@/app/components/fx";
 import { emitAction, queueAction } from "@/lib/ai/bus";
+import { aiFetch } from "@/lib/ai/client";
 import type { CampaignDraft, CopilotAction, CopilotResponse, UiAction } from "@/lib/ai/types";
 
 type Msg = { id: string; role: "user" | "assistant"; content: string; actions?: UiAction[]; drafts?: CampaignDraft[]; error?: boolean };
@@ -16,7 +17,7 @@ const PUR_LL = "#A78BFA";
 
 const PROMPTS: Record<string, string[]> = {
   dashboard: ["What should I do first today?", "Who should I text this week?", "Show churned clients I can still message", "Draft a win-back text for my at-risk regulars"],
-  outreach: ["How have my recent texts performed?", "Who is due a rebook nudge?", "How much have I spent on SMS this month?"],
+  outreach: ["Who should I text today, and what should I say?", "How have my recent texts performed?", "Add my highest-value at-risk regular to today's list", "How much have I spent on SMS this month?"],
   campaign: ["Draft a campaign for at-risk regulars", "What would a first-timer rebook campaign cost?", "Who is on hold, and why?"],
   clients: ["Find clients with 5+ visits who have gone quiet", "Who has opted out or is on hold?", "Show my highest value clients"],
   barbers: ["Which barber looks strongest right now?", "Summarise barber performance"],
@@ -152,7 +153,8 @@ export default function Copilot() {
         if (here !== a.path) { router.push(a.path); here = a.path; waitingForMount = true; }
         continue;
       }
-      if (!here.startsWith(DASH)) { router.push(DASH); here = DASH; waitingForMount = true; }
+      const handledHere = here.startsWith(DASH) || (here.startsWith("/merchant/outreach") && (a.type === "open_sms" || a.type === "set_filters"));
+      if (!handledHere) { router.push(DASH); here = DASH; waitingForMount = true; }
       if (waitingForMount) queueAction(a as CopilotAction); else emitAction(a as CopilotAction);
     }
   }, [pathname, router]);
@@ -163,7 +165,7 @@ export default function Copilot() {
     const next: Msg[] = [...messages, { id: uid(), role: "user", content: t }];
     setMessages(next); setInput(""); setLoading(true);
     try {
-      const res = await fetch("/api/ai/copilot", {
+      const res = await aiFetch("/api/ai/copilot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: next.filter((m) => !m.error).map((m) => ({ role: m.role, content: m.content })), context: { path: pathname } }),

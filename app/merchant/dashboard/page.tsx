@@ -3,6 +3,10 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { RevenueRecoveryWidget, DemandHeatmapWidget } from "@/app/components/dashboard-widgets";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { AuroraBackground, CountUp } from "@/app/components/fx";
+import { useCopilotActions } from "@/lib/ai/bus";
+import { aiFetch } from "@/lib/ai/client";
+import type { CopilotAction } from "@/lib/ai/types";
  
 interface Customer {
   score_id: string; user_id: string; name: string; phone: string; email: string | null;
@@ -37,7 +41,7 @@ const MARKOV_META: Record<MarkovState, { label: string; strategy: string; discou
 // The server appends "\nOpt out: <base>/o/<10-char token>" to every message.
 // Reserve = 10 ("\nOpt out: ") + 3 ("/o/") + 10 (token) + length of your base URL.
 // Optionally set NEXT_PUBLIC_SMS_OPTOUT_BASE_URL so this is exact; otherwise a 35-char domain is assumed.
-const OPTOUT_RESERVE = 23 + (process.env.NEXT_PUBLIC_SMS_OPTOUT_BASE_URL?.replace(/^https?:\/\//, "").length ?? 15);
+const OPTOUT_RESERVE = 23 + (process.env.NEXT_PUBLIC_SMS_OPTOUT_BASE_URL?.length ?? 35);
 const SMS_BODY_MAX = 160 - OPTOUT_RESERVE;
  
 const SMS_STATUS_META: Record<string, { label: string; color: string; reason: string }> = {
@@ -52,7 +56,7 @@ const SMS_STATUS_ORDER = ["ok", "held", "invalid_number", "opted_out", "unknown"
 // ─── Royal Intelligence Design Tokens ─────────────────────────────────────────
 const BG    = "bg-[#0A0612]";
 const SURF  = "#0F0A1E";
-const CARD  = "bg-[#130C24]";
+const CARD  = "rydra-glass";
 const CARD2 = "bg-[#1A1030]";
 const BDR   = "border-[#2A1852]";
 const BDR2  = "border-[#3A2268]";
@@ -120,7 +124,7 @@ function MorningBrief({ venueId }: { venueId: string }) {
   async function generate() {
     setLoading(true);
     try {
-      const res = await fetch("/api/ai/morning-brief", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ venue_id: venueId }) });
+      const res = await aiFetch("/api/ai/morning-brief", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ venue_id: venueId }) });
       const data = await res.json();
       setBrief(data.brief || ""); setCollapsed(false);
     } catch {} finally { setLoading(false); }
@@ -154,8 +158,9 @@ function MorningBrief({ venueId }: { venueId: string }) {
           {brief ? (
             <div className="grid grid-cols-2 gap-3">
               {brief.split(/(?=📊|🎯|👥|📈)/).filter(Boolean).map((section, i) => {
-                const emoji = section[0];
-                const content = section.slice(1).trim();
+                const chars = Array.from(section);
+                const emoji = chars[0];
+                const content = chars.slice(1).join("").trim();
                 const [header, ...rest] = content.split("\n");
                 return (
                   <div key={i} className="rounded-lg p-4 border" style={{ background: "rgba(26,16,48,0.6)", borderColor: "#2A1852" }}>
@@ -175,8 +180,8 @@ function MorningBrief({ venueId }: { venueId: string }) {
 }
  
 // ─── SMS Drawer ───────────────────────────────────────────────────────────────
-function SmsDrawer({ customer, onClose }: { customer: Customer; onClose: () => void }) {
-  const [smsText, setSmsText] = useState(""); const [generating, setGenerating] = useState(false);
+function SmsDrawer({ customer, onClose, initialText }: { customer: Customer; onClose: () => void; initialText?: string }) {
+  const [smsText, setSmsText] = useState(initialText ?? ""); const [generating, setGenerating] = useState(false);
   const [sending, setSending] = useState(false); const [sent, setSent] = useState(false);
   const [error, setError] = useState("");
   const markovState = deriveMarkovState(customer); const meta = MARKOV_META[markovState];
@@ -194,7 +199,7 @@ function SmsDrawer({ customer, onClose }: { customer: Customer; onClose: () => v
     if (blocked) return;
     setGenerating(true); setError("");
     try {
-      const res = await fetch("/api/ai/sms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customer, max_chars: SMS_BODY_MAX }) });
+      const res = await aiFetch("/api/ai/sms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customer, max_chars: SMS_BODY_MAX }) });
       const data = await res.json();
       setSmsText((data.message || "").slice(0, SMS_BODY_MAX));
     }
@@ -206,7 +211,7 @@ function SmsDrawer({ customer, onClose }: { customer: Customer; onClose: () => v
     if (blocked || !smsText.trim() || charCount > SMS_BODY_MAX) return;
     setSending(true); setError("");
     try {
-      const res = await fetch("/api/sms/send", {
+      const res = await aiFetch("/api/sms/send", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: smsText, customer_name: customer.name, customer_id: customer.user_id,
@@ -340,6 +345,7 @@ export default function DashboardPage() {
   const [curPage, setCurPage] = useState(1);
   const [perPage, setPerPage] = useState(50);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [draftText, setDraftText] = useState("");
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
@@ -349,7 +355,7 @@ export default function DashboardPage() {
   const VENUE_ID = process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID || "e1a6c15d-8ccc-4f58-aefb-8bea46e39918";
  
   useEffect(() => {
-    fetch(`/api/intelligence/at-risk-customers?venue_id=${VENUE_ID}`)
+    aiFetch(`/api/intelligence/at-risk-customers?venue_id=${VENUE_ID}`)
       .then(async r => {
         const d = await r.json();
         if (!r.ok || d.error) throw new Error(d.details || d.error || "Failed to load customers");
@@ -361,11 +367,42 @@ export default function DashboardPage() {
   }, []);
   useEffect(() => { if (customers.length > 0 && recs.length === 0) generateRecs(); }, [customers]);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chat, chatLoading]);
+
+  // ── Copilot control: the AI can filter the table, scroll, and open the composer ──
+  const pendingSms = useRef<{ user_id: string; draft?: string } | null>(null);
+  const SECTION_IDS: Record<string, string> = { kpis: "kpis", recovery: "recovery", heatmap: "heatmap", brief: "brief", ai: "rydra-ai", charts: "charts", clients: "client-table" };
+  function scrollWhenReady(id: string, tries = 12) {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    else if (tries > 0) setTimeout(() => scrollWhenReady(id, tries - 1), 300);
+  }
+  function openPendingSms() {
+    const p = pendingSms.current;
+    if (!p) return;
+    const c = customers.find(x => x.user_id === p.user_id);
+    if (!c) return; // list not loaded yet, or unknown id
+    pendingSms.current = null;
+    setDraftText(p.draft ?? ""); setSelectedCustomer(c);
+  }
+  useCopilotActions((a: CopilotAction) => {
+    if (a.type === "set_filters") {
+      if (a.segment !== undefined) setFilterSeg(a.segment);
+      if (a.sms_status !== undefined) setFilterSms(a.sms_status);
+      if (a.search !== undefined) setSearch(a.search);
+      scrollWhenReady("client-table");
+    } else if (a.type === "scroll_to") {
+      scrollWhenReady(SECTION_IDS[a.section] ?? "client-table");
+    } else if (a.type === "open_sms") {
+      pendingSms.current = { user_id: a.user_id, draft: a.draft };
+      openPendingSms();
+    }
+  });
+  useEffect(() => { openPendingSms(); }, [customers]);
  
   async function generateRecs() {
     setLoadingRecs(true);
     try {
-      const res = await fetch("/api/ai/insights", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ venue_id: VENUE_ID, type: "recommendations" }) });
+      const res = await aiFetch("/api/ai/insights", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ venue_id: VENUE_ID, type: "recommendations" }) });
       const data = await res.json();
       const r = (data.recommendations || []).map((x: Recommendation, i: number) => ({ ...x, confidence: x.confidence ?? [0.85, 0.72, 0.91][i % 3] }));
       setRecs(r.length > 0 ? r : FALLBACK_RECS);
@@ -376,7 +413,7 @@ export default function DashboardPage() {
     if (!message.trim() || chatLoading) return;
     setChatInput(""); setChat(prev => [...prev, { role: "user", content: message.trim() }]); setChatLoading(true);
     try {
-      const res = await fetch("/api/ai/insights", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ venue_id: VENUE_ID, type: "chat", query: message.trim() }) });
+      const res = await aiFetch("/api/ai/insights", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ venue_id: VENUE_ID, type: "chat", query: message.trim() }) });
       const data = await res.json();
       setChat(prev => [...prev, { role: "assistant", content: data.response }]);
     } catch { setChat(prev => [...prev, { role: "assistant", content: "Something went wrong." }]); } finally { setChatLoading(false); }
@@ -423,8 +460,9 @@ export default function DashboardPage() {
   );
  
   return (
-    <div className={`min-h-screen ${BG} text-white pb-16`}>
-      {selectedCustomer && <SmsDrawer customer={selectedCustomer} onClose={() => setSelectedCustomer(null)} />}
+    <div className={`min-h-screen ${BG} text-white pb-16`} style={{ isolation: "isolate" }}>
+      <AuroraBackground />
+      {selectedCustomer && <SmsDrawer key={selectedCustomer.user_id} customer={selectedCustomer} initialText={draftText} onClose={() => { setSelectedCustomer(null); setDraftText(""); }} />}
  
       {/* ── Navigation ── */}
       <div className="border-b backdrop-blur-xl sticky top-0 z-30" style={{ background: NAV_BG, borderColor: "#2A1852" }}>
@@ -451,7 +489,7 @@ export default function DashboardPage() {
               </a>
             ))}
           </nav>
-          <button onClick={() => document.getElementById("rydra-ai")?.scrollIntoView({ behavior: "smooth" })}
+          <button onClick={() => window.dispatchEvent(new Event("rydra:toggle-copilot"))}
             className="flex-shrink-0 flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all"
             style={{ background: "rgba(212,160,23,0.1)", border: "1px solid rgba(212,160,23,0.35)", color: GOLD }}>
             <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: GOLD }} />
@@ -484,7 +522,7 @@ export default function DashboardPage() {
         </div>
  
         {/* ── KPI Cards ── */}
-        <div className="grid grid-cols-5 gap-4 mb-4">
+        <div id="kpis" className="grid grid-cols-5 gap-4 mb-4 scroll-mt-20">
           {[
             { label: "Total Clients",      value: customers.length.toLocaleString(), sub: `${atRisk.length.toLocaleString()} critical`,                                       accent: PUR_L },
             { label: "Client Value",       value: `$${(totalValue/1000).toFixed(0)}k`,   sub: "Total customer CLV",                                                           accent: GOLD },
@@ -496,7 +534,7 @@ export default function DashboardPage() {
               <div className="absolute left-0 top-3 bottom-3 w-[2px] rounded-r-full" style={{ background: accent }} />
               <div className="pl-3">
                 <div className="text-[10px] font-semibold uppercase tracking-widest mb-3" style={{ color: "#6B5C8A" }}>{label}</div>
-                <div className="text-3xl font-bold tracking-tight text-white mb-1">{value}</div>
+                <div className="text-3xl font-bold tracking-tight text-white mb-1"><CountUp text={value} /></div>
                 <div className="text-[11px]" style={{ color: "#6B5C8A" }}>{sub}</div>
               </div>
             </div>
@@ -521,13 +559,13 @@ export default function DashboardPage() {
         </div>
  
         {/* ── Revenue Recovery ── */}
-        <RevenueRecoveryWidget venueId={VENUE_ID} />
+        <div id="recovery" className="scroll-mt-20"><RevenueRecoveryWidget venueId={VENUE_ID} /></div>
  
         {/* ── Demand Heatmap ── */}
-        <DemandHeatmapWidget venueId={VENUE_ID} customers={customers} />
+        <div id="heatmap" className="scroll-mt-20"><DemandHeatmapWidget venueId={VENUE_ID} customers={customers} /></div>
  
         {/* ── Morning Brief ── */}
-        <MorningBrief venueId={VENUE_ID} />
+        <div id="brief" className="scroll-mt-20"><MorningBrief venueId={VENUE_ID} /></div>
  
         {/* ── AI Recommendations ── */}
         <div className={`${CARD} border ${BDR} rounded-xl p-6 mb-6`}>
@@ -655,7 +693,7 @@ export default function DashboardPage() {
         </div>
  
         {/* ── Charts ── */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
+        <div id="charts" className="grid grid-cols-3 gap-4 mb-6 scroll-mt-20">
           {[
             { title: "Risk Distribution", sub: "Client segments", content: (
               <ResponsiveContainer width="100%" height={200}>
@@ -784,7 +822,7 @@ export default function DashboardPage() {
                           Blocked
                         </span>
                       ) : (
-                        <button onClick={() => setSelectedCustomer(c)}
+                        <button onClick={() => { setDraftText(""); setSelectedCustomer(c); }}
                           className="px-3 py-1.5 rounded-md text-[10px] font-semibold uppercase tracking-wider transition-all opacity-0 group-hover:opacity-100"
                           style={{ background: "rgba(91,33,182,0.15)", border: "1px solid rgba(91,33,182,0.35)", color: PUR_LL }}>
                           SMS

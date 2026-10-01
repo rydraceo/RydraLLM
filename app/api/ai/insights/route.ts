@@ -1,476 +1,101 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import Anthropic from "@anthropic-ai/sdk";
+import type { ToolCtx } from "@/lib/ai/tools";
+import { ascii } from "@/lib/ai/tools";
+import { runAgent, READ_ONLY_TOOLS, GROUNDING_RULES } from "@/lib/ai/agent";
+import { authorize, rateLimited, DENIED_MESSAGE } from "@/lib/ai/access";
+import { getCustomers } from "@/lib/ai/customers";
+import { computeOutreach, outreachConfig } from "@/lib/outreach/data";
+import { parseJsonLoose, validateRecommendations, fallbackRecommendations, templateProblem, fallbackTemplate, stateFromLabel, validatePlan, fallbackPlan } from "@/lib/ai/briefs";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
-interface Customer {
-  name: string;
-  phone: string;
-  email: string | null;
-  gap_ratio: number;
-  days_overdue: number;
-  visits: number;
-  potential_value: string;
-  churn_score: number | null;
-  risk_segment: string;
-  intervention_recommended: boolean;
-  last_visit: string;
-  avg_gap_days: number;
-}
+const today = () => new Date().toLocaleDateString("en-AU", { timeZone: "Australia/Sydney", weekday: "long", day: "numeric", month: "long", year: "numeric" });
+const persona = () => `You are RydraAI, the analyst inside the Rydra demand-intelligence dashboard for Alkami Barbershop in Canberra, Australia. Today is ${today()}.`;
 
-// ─── OpenAI Tool Definitions ──────────────────────────────────────────────────
+export async function POST(req: NextRequest) {
+  if (!authorize(req)) return NextResponse.json({ error: DENIED_MESSAGE }, { status: 401 });
+  if (rateLimited(req)) return NextResponse.json({ error: "Slow down a little. Try again in a minute." }, { status: 429 });
 
-const tools = [
-  {
-    type: "function",
-    function: {
-      name: "get_customers_by_segment",
-      description:
-        "Fetch customers filtered by risk segment. Use this to answer questions about specific groups.",
-      parameters: {
-        type: "object",
-        properties: {
-          segment: {
-            type: "string",
-            enum: ["at_risk", "on_fence", "loyal", "intervention_ready"],
-            description:
-              "at_risk = gap_ratio > 1.5, on_fence = 0.5–1.5, loyal = < 0.5, intervention_ready = flagged for outreach",
-          },
-          limit: {
-            type: "number",
-            description: "Max customers to return. Default 10, max 50.",
-          },
-        },
-        required: ["segment"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_top_customers",
-      description:
-        "Get top N customers ranked by a specific metric. Use for 'who are the most at-risk' or 'highest value' type questions.",
-      parameters: {
-        type: "object",
-        properties: {
-          metric: {
-            type: "string",
-            enum: ["gap_ratio", "churn_score", "potential_value", "days_overdue"],
-          },
-          limit: {
-            type: "number",
-            description: "Number of results. Default 10, max 50.",
-          },
-          segment: {
-            type: "string",
-            enum: ["at_risk", "on_fence", "loyal", "all"],
-            description: "Optionally pre-filter by segment before ranking. Default: all.",
-          },
-        },
-        required: ["metric"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "search_customer",
-      description: "Find a specific customer by name or phone number.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: {
-            type: "string",
-            description: "Name fragment or phone number to search.",
-          },
-        },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_revenue_breakdown",
-      description:
-        "Get total and per-segment CLV revenue breakdown. Use for revenue or financial questions.",
-      parameters: {
-        type: "object",
-        properties: {},
-      },
-    },
-  },
-];
+  const venueId = process.env.ALKAMI_VENUE_ID || process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID;
+  const businessId = process.env.ALKAMI_BUSINESS_ID;
+  if (!venueId || !businessId) return NextResponse.json({ error: "Server misconfigured: ALKAMI_VENUE_ID or ALKAMI_BUSINESS_ID missing." }, { status: 503 });
 
-// ─── Tool Executor (runs against in-memory customer array) ────────────────────
+  let body: any;
+  try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
+  const type = String(body?.type ?? "");
 
-function executeTool(name: string, args: any, customers: Customer[]): any {
-  switch (name) {
-    case "get_customers_by_segment": {
-      const { segment, limit = 10 } = args;
-      let filtered = customers;
-      if (segment === "at_risk") filtered = customers.filter((c) => c.gap_ratio > 1.5);
-      else if (segment === "on_fence")
-        filtered = customers.filter((c) => c.gap_ratio > 0.5 && c.gap_ratio <= 1.5);
-      else if (segment === "loyal") filtered = customers.filter((c) => c.gap_ratio <= 0.5);
-      else if (segment === "intervention_ready")
-        filtered = customers.filter((c) => c.intervention_recommended);
+  const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+  const ctx: ToolCtx = { supabase, venueId, businessId, actions: [], drafts: [] };
 
-      return filtered.slice(0, Math.min(limit, 50)).map((c) => ({
-        name: c.name,
-        phone: c.phone,
-        gap_ratio: c.gap_ratio,
-        days_overdue: c.days_overdue,
-        potential_value: c.potential_value,
-        churn_score: c.churn_score,
-        visits: c.visits,
-        risk_segment: c.risk_segment,
-      }));
-    }
-
-    case "get_top_customers": {
-      const { metric, limit = 10, segment = "all" } = args;
-      let filtered = customers;
-      if (segment === "at_risk") filtered = customers.filter((c) => c.gap_ratio > 1.5);
-      else if (segment === "on_fence")
-        filtered = customers.filter((c) => c.gap_ratio > 0.5 && c.gap_ratio <= 1.5);
-      else if (segment === "loyal") filtered = customers.filter((c) => c.gap_ratio <= 0.5);
-
-      const sorted = [...filtered].sort((a: any, b: any) => {
-        const aVal =
-          metric === "potential_value" ? parseFloat(a[metric]) : a[metric] ?? 0;
-        const bVal =
-          metric === "potential_value" ? parseFloat(b[metric]) : b[metric] ?? 0;
-        return bVal - aVal;
-      });
-
-      return sorted.slice(0, Math.min(limit, 50)).map((c) => ({
-        name: c.name,
-        phone: c.phone,
-        gap_ratio: c.gap_ratio,
-        days_overdue: c.days_overdue,
-        potential_value: c.potential_value,
-        churn_score: c.churn_score,
-        visits: c.visits,
-      }));
-    }
-
-    case "search_customer": {
-      const { query } = args;
-      const q = query.toLowerCase();
-      return customers
-        .filter((c) => c.name.toLowerCase().includes(q) || c.phone.includes(q))
-        .slice(0, 5)
-        .map((c) => ({
-          name: c.name,
-          phone: c.phone,
-          gap_ratio: c.gap_ratio,
-          days_overdue: c.days_overdue,
-          potential_value: c.potential_value,
-          churn_score: c.churn_score,
-          visits: c.visits,
-          last_visit: c.last_visit,
-          risk_segment: c.risk_segment,
-          intervention_recommended: c.intervention_recommended,
-        }));
-    }
-
-    case "get_revenue_breakdown": {
-      const atRisk = customers.filter((c) => c.gap_ratio > 1.5);
-      const onFence = customers.filter((c) => c.gap_ratio > 0.5 && c.gap_ratio <= 1.5);
-      const loyal = customers.filter((c) => c.gap_ratio <= 0.5);
-      const interventionReady = customers.filter((c) => c.intervention_recommended);
-      const sumValue = (arr: Customer[]) =>
-        arr.reduce((s, c) => s + parseFloat(c.potential_value || "0"), 0);
-      const total = sumValue(customers);
-
-      return {
-        total_clv: `$${total.toFixed(2)}`,
-        at_risk_clv: `$${sumValue(atRisk).toFixed(2)}`,
-        on_fence_clv: `$${sumValue(onFence).toFixed(2)}`,
-        loyal_clv: `$${sumValue(loyal).toFixed(2)}`,
-        intervention_ready_clv: `$${sumValue(interventionReady).toFixed(2)}`,
-        avg_clv_per_customer: `$${(total / customers.length).toFixed(2)}`,
-      };
-    }
-
-    default:
-      return { error: `Unknown tool: ${name}` };
-  }
-}
-
-// ─── Build Summary Snapshot (always injected as context) ──────────────────────
-
-function buildSummary(customers: Customer[]) {
-  const total = customers.length;
-  const atRisk = customers.filter((c) => c.gap_ratio > 1.5);
-  const onFence = customers.filter((c) => c.gap_ratio > 0.5 && c.gap_ratio <= 1.5);
-  const loyal = customers.filter((c) => c.gap_ratio <= 0.5);
-  const interventionReady = customers.filter((c) => c.intervention_recommended);
-
-  const sumValue = (arr: Customer[]) =>
-    arr.reduce((s, c) => s + parseFloat(c.potential_value || "0"), 0);
-
-  const avgGapRatio =
-    customers.reduce((s, c) => s + c.gap_ratio, 0) / (total || 1);
-  const avgChurn =
-    customers.reduce((s, c) => s + (c.churn_score ?? 0), 0) / (total || 1);
-
-  const topAtRisk = [...atRisk]
-    .sort((a, b) => b.gap_ratio - a.gap_ratio)
-    .slice(0, 5)
-    .map((c) => ({
-      name: c.name,
-      gap_ratio: c.gap_ratio.toFixed(2),
-      days_overdue: c.days_overdue,
-      clv: `$${c.potential_value}`,
-    }));
-
-  return {
-    totalCustomers: total,
-    atRisk: { count: atRisk.length, pct: ((atRisk.length / total) * 100).toFixed(1) },
-    onFence: { count: onFence.length, pct: ((onFence.length / total) * 100).toFixed(1) },
-    loyal: { count: loyal.length, pct: ((loyal.length / total) * 100).toFixed(1) },
-    interventionReady: { count: interventionReady.length, clv: `$${sumValue(interventionReady).toFixed(0)}` },
-    totalCLV: `$${sumValue(customers).toFixed(0)}`,
-    avgGapRatio: avgGapRatio.toFixed(2),
-    avgChurnScore: (avgChurn * 10).toFixed(1),
-    topAtRisk,
-  };
-}
-
-// ─── OpenAI with Function Calling (primary) ───────────────────────────────────
-
-async function runOpenAI(
-  systemPrompt: string,
-  userMessage: string,
-  customers: Customer[],
-  structured: boolean = false
-): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("OPENAI_API_KEY not configured");
-
-  const messages: any[] = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: userMessage },
-  ];
-
-  // Recommendations mode: no tools, just get JSON back
-  if (structured) {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages,
-        max_tokens: 1000,
-        response_format: { type: "json_object" },
-      }),
-    });
-
-    if (!response.ok) throw new Error(`OpenAI error: ${await response.text()}`);
-    const data = await response.json();
-    return data.choices[0].message.content;
-  }
-
-  // Chat mode: function calling loop (max 5 rounds)
-  let round = 0;
-  while (round < 5) {
-    round++;
-
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages,
-        tools,
-        tool_choice: "auto",
-        max_tokens: 1000,
-      }),
-    });
-
-    if (!response.ok) throw new Error(`OpenAI error: ${await response.text()}`);
-    const data = await response.json();
-    const choice = data.choices[0];
-
-    // If no tool calls → we have the final answer
-    if (choice.finish_reason === "stop" || !choice.message.tool_calls?.length) {
-      return choice.message.content;
-    }
-
-    // Execute all tool calls and append results
-    messages.push(choice.message);
-
-    for (const toolCall of choice.message.tool_calls) {
-      const args = JSON.parse(toolCall.function.arguments);
-      const result = executeTool(toolCall.function.name, args, customers);
-      messages.push({
-        role: "tool",
-        tool_call_id: toolCall.id,
-        content: JSON.stringify(result),
-      });
-    }
-  }
-
-  throw new Error("OpenAI function calling loop exceeded max rounds");
-}
-
-// ─── Anthropic Fallback (context-only, no function calling) ───────────────────
-
-async function runAnthropic(
-  systemPrompt: string,
-  userMessage: string
-): Promise<string> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
-
-  const client = new Anthropic({ apiKey });
-
-  const response = await client.messages.create({
-    model: "claude-haiku-4-5",
-    max_tokens: 1024,
-    system: systemPrompt,
-    messages: [{ role: "user", content: userMessage }],
-  });
-
-  return response.content[0].type === "text" ? response.content[0].text : "";
-}
-
-// ─── Main Handler ─────────────────────────────────────────────────────────────
-
-export async function POST(request: NextRequest) {
   try {
-    // Parse body ONCE (previous code called request.json() twice — this broke chat)
-    const body = await request.json();
-    const { venue_id, type, query } = body;
-
-    if (!venue_id) {
-      return NextResponse.json({ error: "venue_id is required" }, { status: 400 });
-    }
-
-    // ── Fetch customers from Supabase ──────────────────────────────────────
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
-    const { data: rawCustomers, error: dbError } = await supabase.rpc(
-      "get_customers_with_scores",
-      { p_venue_id: venue_id }
-    );
-
-    if (dbError) {
-      console.error("[AI] DB error:", dbError);
-      return NextResponse.json({ error: "Failed to fetch customer data" }, { status: 500 });
-    }
-
-    // Transform to match Customer type
-    const customers: Customer[] = (rawCustomers ?? []).map((row: any) => ({
-      name: row.customer_name || "Unknown",
-      phone: row.customer_phone || "",
-      email: row.customer_email || null,
-      gap_ratio: parseFloat(row.gap_ratio?.toFixed(2) || "0"),
-      days_overdue: row.days_since_last_visit || 0,
-      visits: row.total_visits || 0,
-      potential_value: ((row.clv_cents || 0) / 100).toFixed(2),
-      churn_score: row.churn_score_10 ? parseFloat(row.churn_score_10.toFixed(2)) : null,
-      risk_segment: row.risk_segment || "unknown",
-      intervention_recommended: row.intervention_recommended || false,
-      last_visit: row.last_event_at || "",
-      avg_gap_days: row.avg_visit_gap_days || 0,
-    }));
-
-    const summary = buildSummary(customers);
-
-    // ── RECOMMENDATIONS mode ───────────────────────────────────────────────
-    if (type === "recommendations") {
-      const systemPrompt = `You are RydraAI, a revenue intelligence assistant for Alkami Barbershop.
-Your job is to generate sharp, specific, data-driven recommendations — not generic advice.
-Always reference the actual numbers from the data provided.
-Return ONLY valid JSON. No markdown, no preamble.`;
-
-      const userMessage = `Here is the current customer data summary for Alkami Barbershop:
-
-${JSON.stringify(summary, null, 2)}
-
-Generate exactly 3 actionable recommendations. Each must be specific to this data.
-Return this exact JSON structure:
-{
-  "recommendations": [
-    {
-      "title": "Max 5 words",
-      "description": "2-3 sentences referencing specific numbers from the data",
-      "impact": "Specific metric e.g. +$450 revenue, +18% conversion",
-      "actionLabel": "One of: Send SMS | Create Offer | Launch Campaign | Adjust Pricing | Feature Item"
-    }
-  ]
-}`;
-
-      try {
-        const aiResponse = await runOpenAI(systemPrompt, userMessage, customers, true);
-        const parsed = JSON.parse(aiResponse);
-        return NextResponse.json({ recommendations: parsed.recommendations });
-      } catch (err) {
-        console.error("[AI] Recommendations failed:", err);
-        // Anthropic fallback
-        try {
-          const fallbackResponse = await runAnthropic(systemPrompt, userMessage);
-          const clean = fallbackResponse.replace(/```json|```/g, "").trim();
-          const parsed = JSON.parse(clean);
-          return NextResponse.json({ recommendations: parsed.recommendations });
-        } catch (fallbackErr) {
-          console.error("[AI] Anthropic fallback also failed:", fallbackErr);
-          return NextResponse.json({ error: "AI unavailable" }, { status: 503 });
-        }
-      }
-    }
-
-    // ── CHAT mode ─────────────────────────────────────────────────────────
+    // ── Chat: read-only Q&A ────────────────────────────────────────────────
     if (type === "chat") {
-      if (!query) {
-        return NextResponse.json({ error: "query is required for chat" }, { status: 400 });
-      }
-
-      const systemPrompt = `You are RydraAI, an intelligent assistant for Alkami Barbershop's customer retention dashboard.
-You have access to tools that can query the full customer database (${customers.length} customers).
-Use tools to look up specific data before answering — don't guess.
-Be concise and actionable. Reference real numbers. No corporate fluff.
-
-Summary snapshot (always available without tools):
-${JSON.stringify(summary, null, 2)}`;
-
-      try {
-        const aiResponse = await runOpenAI(systemPrompt, query, customers, false);
-        return NextResponse.json({ response: aiResponse });
-      } catch (err) {
-        console.error("[AI] OpenAI chat failed, trying Anthropic:", err);
-        // Anthropic fallback — inject summary + top 10 as context (no function calling)
-        try {
-          const fallbackSystem = `${systemPrompt}
-
-Note: You don't have tool access in fallback mode. Use the summary snapshot above to answer as best you can.`;
-          const fallbackResponse = await runAnthropic(fallbackSystem, query);
-          return NextResponse.json({ response: fallbackResponse });
-        } catch (fallbackErr) {
-          console.error("[AI] Anthropic fallback also failed:", fallbackErr);
-          return NextResponse.json({ error: "AI unavailable" }, { status: 503 });
-        }
-      }
+      const q = typeof body.query === "string" ? body.query.trim().slice(0, 500) : "";
+      if (!q) return NextResponse.json({ error: "query is required" }, { status: 400 });
+      const r = await runAgent({
+        system: `${persona()}\nAnswer the owner's question using the tools. Lead with the answer. For rankings use a numbered list in the form "1. **Name** - detail". Bold only key figures. No headers, no emoji. Keep it under 180 words.\n\n${GROUNDING_RULES}`,
+        messages: [{ role: "user", content: q }], ctx, tools: READ_ONLY_TOOLS,
+      });
+      if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
+      return NextResponse.json({ response: r.text || "I couldn't work that out. Try rephrasing." });
     }
 
-    return NextResponse.json({ error: "Invalid type. Use 'recommendations' or 'chat'" }, { status: 400 });
+    // ── Recommendations: three data-backed actions ──────────────────────────
+    if (type === "recommendations") {
+      const rows = await getCustomers(supabase, venueId, businessId);
+      let recs = null;
+      const r = await runAgent({
+        system: `${persona()}\nReturn ONLY a JSON object, no other text: {"recommendations":[{"title":string,"description":string,"impact":string,"actionLabel":string,"confidence":number}]}\nExactly 3 recommendations, highest estimated value first.\n- title: max 6 words.\n- description: max 220 characters. Say who, why, and what to do, using numbers from the tools.\n- impact: max 40 characters, like "est. +$1,240 recoverable", using intervention values from the tools.\n- actionLabel: max 3 words.\n- confidence: 0 to 1, higher when the audience is large.\n- Only recommend messaging clients who are messageable. No discounts for loyal or on-the-fence clients. Never invent statistics.\n\n${GROUNDING_RULES}`,
+        messages: [{ role: "user", content: "Give me today's three best recommended actions." }], ctx, tools: READ_ONLY_TOOLS, maxTokens: 900,
+      });
+      if (r.ok) recs = validateRecommendations(parseJsonLoose(r.text));
+      else console.error("[insights] recommendations agent failed:", r.error);
+      return NextResponse.json({ recommendations: recs ?? fallbackRecommendations(rows), source: recs ? "ai" : "data" });
+    }
 
-  } catch (error: any) {
-    console.error("[AI] Unhandled error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    // ── SMS template with {first_name} placeholder ──────────────────────────
+    if (type === "sms_template") {
+      const cfg = outreachConfig();
+      const max = Math.min(Math.max(Number(body.max_chars) || cfg.copy_max, 40), 140);
+      const state = stateFromLabel(typeof body.segment === "string" ? body.segment : undefined);
+      const goal = typeof body.goal === "string" ? ascii(body.goal).slice(0, 120) : "";
+      const sys = `You write one SMS template for Alkami Barbershop in Canberra, Australia.\nSTYLE: Australian English, casual and warm. Use the literal placeholder {first_name} once. Mention "Alkami" once. At most one exclamation mark. No emoji.\nHARD RULES: maximum ${max} characters. No links, URLs or other placeholders (a booking link is added automatically). No prices, discounts or offers. Do not ask them to reply or call. Do not invent barber names or availability.\nOUTPUT: only the message text.`;
+      const user = `Client type: ${state}. ${goal ? `Goal: ${goal}.` : ""} Write the template.`;
+      let message = "";
+      for (let attempt = 0; attempt < 2 && !message; attempt++) {
+        const r = await runAgent({ system: sys, messages: [{ role: "user", content: attempt ? `${user} The previous attempt broke the rules. Follow every rule exactly.` : user }], ctx, tools: "none", maxTokens: 150 });
+        if (!r.ok) break;
+        const t = ascii(r.text).replace(/^["'`]+|["'`]+$/g, "").trim();
+        if (!templateProblem(t, max)) message = t;
+      }
+      return NextResponse.json({ message: message || fallbackTemplate(state, max), source: message ? "ai" : "template", max_chars: max });
+    }
+
+    // ── Outreach plan: who to text today, and what to say ───────────────────
+    if (type === "outreach_plan") {
+      const { overview, candidates } = await computeOutreach(supabase, venueId, businessId);
+      const cfg = overview.config;
+      const n = Math.min(Math.max(Number(body.max_clients) || 25, 1), 100, Math.max(overview.stats.remaining_today, 1));
+      const max = cfg.copy_max;
+      const cand = candidates.map((c) => ({ user_id: c.user_id, markov_state: c.markov_state, intervention_value_aud: c.intervention_value_aud }));
+
+      let plan = null;
+      if (cand.length) {
+        const r = await runAgent({
+          system: `${persona()}\nPick up to ${n} clients for the owner to text today, and write the message.\n- Use query_customers with sms="messageable", sorted by intervention_value, to find them. Skip anyone with has_upcoming_booking.\n- Prefer high estimated value, but a mix of client types is fine if it makes sense. Explain the choice briefly.\n- The server removes anyone texted in the last ${cfg.cooldown_days} days, so extra candidates are fine.\nReturn ONLY a JSON object: {"summary":string (max 280 chars, plain, quote numbers from tools),"segment":"Churned"|"At Risk"|"Stable"|"First timers"|"Mixed","message":string,"user_ids":[string]}\nmessage: max ${max} characters, includes {first_name}, mentions Alkami, no links, no prices or offers, no emoji. user_ids: exactly as returned by query_customers.\n\n${GROUNDING_RULES}`,
+          messages: [{ role: "user", content: `Build today's outreach list of up to ${n} clients.` }], ctx, tools: READ_ONLY_TOOLS, maxTokens: 1800,
+        });
+        if (r.ok) plan = validatePlan(parseJsonLoose(r.text), cand, n, max);
+        else console.error("[insights] plan agent failed:", r.error);
+      }
+      return NextResponse.json({ ...(plan ?? fallbackPlan(cand, n, max)), source: plan ? "ai" : "data" });
+    }
+
+    return NextResponse.json({ error: "Unknown type" }, { status: 400 });
+  } catch (e: any) {
+    console.error("[insights] error", e);
+    return NextResponse.json({ error: "AI request failed. Try again." }, { status: 500 });
   }
 }

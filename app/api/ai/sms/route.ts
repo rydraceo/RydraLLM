@@ -1,4 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { chat } from "@/lib/llm/gateway";
+import { GatewayError } from "@/lib/llm/gateway";
+import { authorize, rateLimited, DENIED_MESSAGE } from "@/lib/ai/access";
+
+export const runtime = "nodejs";
+export const maxDuration = 30;
 
 // ─── Markov State Logic ───────────────────────────────────────────────────────
 
@@ -13,7 +19,7 @@ function deriveMarkovState(customer: { visits: number; gap_ratio: number; status
 }
 
 // The booking link is added by the server, never written by the model.
-const BOOKING_LINK = (process.env.ALKAMI_BOOKING_URL || "getrydra.com/alkami").replace(/^https?:\/\//, "");
+const BOOKING_LINK = (process.env.ALKAMI_BOOKING_URL || "getrydra.com/alkami").replace(/^https?:\/\//, "").replace(/\/+$/, "");
 const DEFAULT_MAX = 102; // body budget: 160 minus the opt-out line
 
 const STATE_STRATEGY: Record<MarkovState, string> = {
@@ -80,40 +86,16 @@ function fallbackMessage(state: MarkovState, name: string | null): string {
 }
 
 async function callModel(system: string, user: string): Promise<string> {
-  const openaiKey = process.env.OPENAI_API_KEY;
-  if (openaiKey) {
-    try {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [{ role: "system", content: system }, { role: "user", content: user }],
-          max_tokens: 80, temperature: 0.7,
-        }),
-      });
-      if (!res.ok) throw new Error(`OpenAI error: ${res.status}`);
-      const data = await res.json();
-      return String(data.choices[0].message.content ?? "");
-    } catch (err) {
-      console.error("[SMS AI] OpenAI failed, trying Anthropic:", err);
-    }
-  }
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  if (!anthropicKey) throw new Error("No AI keys configured");
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 80, system, messages: [{ role: "user", content: user }] }),
-  });
-  if (!res.ok) throw new Error(`Anthropic error: ${res.status}`);
-  const data = await res.json();
-  return String(data.content[0].text ?? "");
+  const r = await chat({ messages: [{ role: "system", content: system }, { role: "user", content: user }], maxTokens: 120, temperature: 0.7 });
+  return r.text;
 }
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
+  if (!authorize(request)) return NextResponse.json({ error: DENIED_MESSAGE }, { status: 401 });
+  if (rateLimited(request, 40)) return NextResponse.json({ error: "Slow down a little. Try again in a minute." }, { status: 429 });
+
   try {
     const body = await request.json();
     const { customer } = body;
@@ -163,7 +145,7 @@ Maximum ${copyMax} characters. Do not include a link. Return only the message.`;
       }
       if (issues.length) throw new Error(`Rejected after retry: ${issues.join("; ")}`);
     } catch (err) {
-      console.error("[SMS AI] Using fallback template:", err);
+      console.error("[SMS AI] Using fallback template:", err instanceof GatewayError ? err.message : err);
       text = fallbackMessage(state, firstName);
       if (text.length > copyMax) text = text.slice(0, copyMax).trimEnd();
       source = "fallback";
