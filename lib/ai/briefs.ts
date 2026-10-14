@@ -3,7 +3,17 @@ import { ascii } from "@/lib/ai/tools";
 
 // Pure helpers: parsing, validation and data-only fallbacks, so the AI panels never show invented numbers.
 
-export type Rec = { title: string; description: string; impact: string; actionLabel: string; confidence: number };
+export type Audience = "at_risk" | "churned" | "first_timers" | "on_fence" | "loyal";
+export type Rec = { title: string; description: string; impact: string; actionLabel: string; confidence: number; audience: Audience };
+const AUDIENCES: Audience[] = ["at_risk", "churned", "first_timers", "on_fence", "loyal"];
+function inferAudience(text: string): Audience {
+  const t = text.toLowerCase();
+  if (/first[- ]?time|new client|second visit|rebook/.test(t)) return "first_timers";
+  if (/churn|lapsed|win[- ]?back|miss you/.test(t)) return "churned";
+  if (/fence|nudge/.test(t)) return "on_fence";
+  if (/loyal|apprecia/.test(t)) return "loyal";
+  return "at_risk";
+}
 
 export function parseJsonLoose(text: string): unknown | null {
   const a = text.indexOf("{"); const b = text.lastIndexOf("}");
@@ -68,10 +78,10 @@ function groups(rows: CopilotCustomer[]) {
 export function fallbackRecommendations(rows: CopilotCustomer[]): Rec[] {
   const g = groups(rows);
   const pool: { key: MarkovKey; rec: (n: number, iv: number) => Omit<Rec, "impact" | "confidence"> }[] = [
-    { key: "R_at_risk", rec: (n) => ({ title: "Win back at-risk regulars", description: `${n.toLocaleString()} regulars are past their usual cycle and can be messaged. A personal nudge before they lapse is usually the best return.`, actionLabel: "Plan campaign" }) },
-    { key: "X", rec: (n) => ({ title: "Re-engage churned clients", description: `${n.toLocaleString()} long-lapsed clients can still be messaged. Lead with a warm "we miss you" and keep it short.`, actionLabel: "Plan campaign" }) },
-    { key: "C", rec: (n) => ({ title: "Rebook first-timers", description: `${n.toLocaleString()} first-time clients haven't rebooked. One nudge around the five-to-six week mark helps build the habit.`, actionLabel: "Plan campaign" }) },
-    { key: "R_on_fence", rec: (n) => ({ title: "Nudge on-the-fence regulars", description: `${n.toLocaleString()} regulars are slightly overdue. A gentle reminder is enough, no offer needed.`, actionLabel: "Plan campaign" }) },
+    { key: "R_at_risk", rec: (n) => ({ audience: "at_risk" as Audience, title: "Win back at-risk regulars", description: `${n.toLocaleString()} regulars are past their usual cycle and can be messaged. A personal nudge before they lapse is usually the best return.`, actionLabel: "Plan campaign" }) },
+    { key: "X", rec: (n) => ({ audience: "churned" as Audience, title: "Re-engage churned clients", description: `${n.toLocaleString()} long-lapsed clients can still be messaged. Lead with a warm "we miss you" and keep it short.`, actionLabel: "Plan campaign" }) },
+    { key: "C", rec: (n) => ({ audience: "first_timers" as Audience, title: "Rebook first-timers", description: `${n.toLocaleString()} first-time clients haven't rebooked. One nudge around the five-to-six week mark helps build the habit.`, actionLabel: "Plan campaign" }) },
+    { key: "R_on_fence", rec: (n) => ({ audience: "on_fence" as Audience, title: "Nudge on-the-fence regulars", description: `${n.toLocaleString()} regulars are slightly overdue. A gentle reminder is enough, no offer needed.`, actionLabel: "Plan campaign" }) },
   ];
   return pool
     .filter((p) => (g[p.key]?.n ?? 0) > 0)
@@ -91,7 +101,8 @@ export function validateRecommendations(parsed: unknown): Rec[] | null {
     const actionLabel = typeof r?.actionLabel === "string" && r.actionLabel.trim() ? r.actionLabel.trim().slice(0, 24) : "Plan campaign";
     const c = Number(r?.confidence);
     if (!title || !description || !impact) return null;
-    out.push({ title, description, impact, actionLabel, confidence: Number.isFinite(c) ? Math.min(Math.max(c, 0.3), 0.95) : 0.7 });
+    const audience: Audience = AUDIENCES.includes(r?.audience) ? r.audience : inferAudience(`${title} ${description}`);
+    out.push({ title, description, impact, actionLabel, confidence: Number.isFinite(c) ? Math.min(Math.max(c, 0.3), 0.95) : 0.7, audience });
   }
   return out.length >= 1 ? out : null;
 }

@@ -1,128 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ask } from "@/lib/llm/gateway";
 import { createClient } from "@supabase/supabase-js";
- 
-function supabase() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-}
- 
-// ─── POST: Given a cancelled slot datetime, rank clients and generate messages ─
+import { authorize, rateLimited, DENIED_MESSAGE } from "@/lib/ai/access";
+import { loadPeople, rankForSlot, dowOf, fmtTime, shortLabel, DOW_NAMES } from "@/lib/forecast/demand";
+
+export const runtime = "nodejs";
+export const maxDuration = 30;
+
+// POST { slot_date: "YYYY-MM-DD", slot_time?: "HH:MM", barber?: string, count?: 1..15 }
+// Ranks the clients most likely to take a gap. Messages are written afterwards, in the bulk composer,
+// so you can review them before anything is sent. Nobody who is opted out, on hold, recently texted
+// or already booked is ever returned.
 export async function POST(req: NextRequest) {
-  const { venue_id, slot_datetime, slot_barber } = await req.json();
- 
-  if (!venue_id || !slot_datetime) {
-    return NextResponse.json({ error: "venue_id and slot_datetime required" }, { status: 400 });
-  }
- 
-  const slotDate = new Date(slot_datetime);
-  const slotDOW = slotDate.toLocaleDateString("en-AU", { weekday: "long" });
-  const slotTime = slotDate.toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit", hour12: true });
-  const slotDateLabel = slotDate.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" });
- 
-  const db = supabase();
- 
+  if (!authorize(req)) return NextResponse.json({ error: DENIED_MESSAGE }, { status: 401 });
+  if (rateLimited(req, 30)) return NextResponse.json({ error: "Slow down a little. Try again in a minute." }, { status: 429 });
+
+  const venueId = process.env.ALKAMI_VENUE_ID || process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID;
+  const businessId = process.env.ALKAMI_BUSINESS_ID;
+  if (!venueId || !businessId) return NextResponse.json({ error: "Server misconfigured: ALKAMI_VENUE_ID or ALKAMI_BUSINESS_ID missing." }, { status: 503 });
+
+  let body: any;
+  try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid request." }, { status: 400 }); }
+  const date = String(body?.slot_date ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) return NextResponse.json({ error: "A valid slot_date (YYYY-MM-DD) is required." }, { status: 400 });
+  const time = /^\d{2}:\d{2}$/.test(String(body?.slot_time ?? "")) ? String(body.slot_time) : "";
+  const barber = typeof body?.barber === "string" ? body.barber.replace(/[^A-Za-z' .\-]/g, "").trim().slice(0, 30) : "";
+  const count = Math.min(Math.max(Math.round(Number(body?.count) || 5), 1), 15);
+
   try {
-    // 1. Get at-risk/on-fence/churned clients (from the scoring view)
-    const { data: candidates } = await db
-      .from("customer_churn_scores")
-      .select("*")
-      .eq("venue_id", venue_id)
-      .in("markov_state", ["R_at_risk", "R_on_fence", "X", "C"])
-      .not("phone", "is", null)
-      .neq("phone", "No phone")
-      .order("intervention_value", { ascending: false, nullsFirst: false })
-      .limit(50);
- 
-    if (!candidates?.length) {
-      return NextResponse.json({ clients: [], message: "No eligible clients found" });
-    }
- 
-    // 2. Check cooldown — skip anyone contacted in last 14 days
-    const cooldownSince = new Date(Date.now() - 14 * 86400_000).toISOString();
-    const { data: recentOutreach } = await db
-      .from("sms_outreach")
-      .select("customer_id")
-      .eq("venue_id", venue_id)
-      .gte("created_at", cooldownSince);
- 
-    const recentlyContacted = new Set((recentOutreach || []).map(r => r.customer_id));
- 
-    // 3. Score and rank
-    const scored = candidates
-      .filter(c => !recentlyContacted.has(c.user_id))
-      .map(c => {
-        // Base score: intervention value
-        const ivScore = (c.intervention_value || 0) * 10;
- 
-        // Urgency multiplier: more overdue = higher priority for a slot offer
-        const urgencyMultiplier = c.days_overdue > 90 ? 1.5 : c.days_overdue > 45 ? 1.2 : 1.0;
- 
-        // Day-of-week preference: if they historically visit on this DOW, boost score
-        // (We don't have per-client DOW data yet, so we use markov_state heuristic)
-        const stateBoost = c.markov_state === "R_at_risk" ? 1.3 : c.markov_state === "R_on_fence" ? 1.1 : 1.0;
- 
-        return {
-          ...c,
-          slot_score: Math.round(ivScore * urgencyMultiplier * stateBoost),
-        };
-      })
-      .sort((a, b) => b.slot_score - a.slot_score)
-      .slice(0, 5); // Top 5 candidates
- 
-    // 4. Generate personalised slot-fill messages via AI
-    const clients = await Promise.all(
-      scored.slice(0, 3).map(async (client) => {
-        let message = "";
-        try {
-          const firstName = client.name?.split(" ")[0] || "mate";
-          const barberLine = slot_barber ? `with ${slot_barber} ` : "";
- 
-          message = (await ask({ user: `Write a short SMS (max 130 chars) for a barbershop client named ${firstName} offering a cancelled appointment slot.
- 
-Slot: ${slotDateLabel} at ${slotTime}${slot_barber ? ` with ${slot_barber}` : ""}
-Client: ${client.days_overdue} days since last visit, ${client.markov_state === "R_at_risk" ? "at risk of churning" : client.markov_state === "X" ? "churned" : "occasional visitor"}
- 
-Rules:
-- Start with "Hey ${firstName},"
-- Mention we've had a cancellation (don't say "cancellation", say "a spot just opened up")
-- Include the date and time naturally
-- Ask them to reply YES to lock it in
-- Friendly, direct, not pushy
-- DO NOT include a URL
-- Under 130 characters total
- 
-Return only the SMS text, nothing else.`, maxTokens: 80, temperature: 0.7 })) || "";
-        } catch {
-          const firstName = client.name?.split(" ")[0] || "mate";
-          message = `Hey ${firstName}, a spot just opened up ${slotDateLabel} at ${slotTime}. Want it? Reply YES to lock it in — Alkami.`;
-        }
- 
-        return {
-          user_id: client.user_id,
-          name: client.name,
-          phone: client.phone,
-          markov_state: client.markov_state,
-          days_overdue: client.days_overdue,
-          intervention_value: client.intervention_value,
-          potential_value: client.potential_value,
-          slot_score: client.slot_score,
-          message,
-          message_length: message.length,
-        };
-      })
-    );
- 
+    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+    const { rows, reachableIds } = await loadPeople(supabase, venueId, businessId);
+    const dow = dowOf(date);
+    const { ranked, total } = rankForSlot(rows, reachableIds, dow, count);
     return NextResponse.json({
-      slot_datetime,
-      slot_label: `${slotDateLabel} at ${slotTime}`,
-      clients,
-      total_candidates: scored.length,
+      slot: { date, time: time ? fmtTime(time) : "", barber, weekday: DOW_NAMES[dow], label: shortLabel(date) },
+      slot_label: `${shortLabel(date)}${time ? ` at ${fmtTime(time)}` : ""}${barber ? ` with ${barber}` : ""}`,
+      clients: ranked,
+      total_candidates: total,
     });
- 
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error("[slot-fill]", err);
+    return NextResponse.json({ error: "Could not rank clients." }, { status: 500 });
   }
 }

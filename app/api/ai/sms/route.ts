@@ -60,8 +60,9 @@ const ascii = (s: string) =>
 const clean = (s: string) => ascii(s).replace(/^["'`]+|["'`]+$/g, "").trim();
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-function problems(t: string, firstName: string | null, copyMax: number, offer: string): string[] {
+function problems(t: string, firstName: string | null, copyMax: number, offer: string, slotDay = ""): string[] {
   const p: string[] = [];
+  if (slotDay && !new RegExp(esc(slotDay), "i").test(t)) p.push(`must mention the open day (${slotDay})`);
   if (!t) p.push("empty message");
   if (t.length > copyMax) p.push(`over ${copyMax} characters (was ${t.length})`);
   if (firstName && !new RegExp(`\\b${esc(firstName)}\\b`, "i").test(t)) p.push(`must use the first name "${firstName}"`);
@@ -74,8 +75,9 @@ function problems(t: string, firstName: string | null, copyMax: number, offer: s
   return p;
 }
 
-function fallbackMessage(state: MarkovState, name: string | null): string {
+function fallbackMessage(state: MarkovState, name: string | null, slotText = ""): string {
   const n = (name || "there").slice(0, 12);
+  if (slotText) return `Hi ${n}, Alkami has a spot open ${slotText}. Grab it here:`;
   switch (state) {
     case "C": return `Hi ${n}, Alkami here. Ready for your next cut? Book a spot:`;
     case "X": return `Hi ${n}, we miss you at Alkami. Grab a spot this week:`;
@@ -118,6 +120,15 @@ export async function POST(request: NextRequest) {
     const offerRaw = typeof body.offer === "string" ? ascii(body.offer) : "";
     const offer = /^\$\d{1,3} off$/i.test(offerRaw) ? offerRaw : "";
 
+    // An open slot to offer (from the slot-fill tool). Only a tightly validated short string is ever used.
+    const slotIn = body.slot && typeof body.slot === "object" ? body.slot : null;
+    const okTxt = (v: unknown, re: RegExp) => (typeof v === "string" && re.test(ascii(v)) ? ascii(v) : "");
+    const slotLabel = slotIn ? okTxt(slotIn.label, /^[A-Za-z]{3,9} \d{1,2} [A-Za-z]{3}$/) : "";
+    const slotTime = slotIn ? okTxt(slotIn.time, /^\d{1,2}:\d{2} (am|pm)$/) : "";
+    const slotBarber = slotIn ? okTxt(slotIn.barber, /^[A-Za-z' .\-]{2,30}$/) : "";
+    const slotText = slotLabel ? `${slotLabel}${slotTime ? ` at ${slotTime}` : ""}${slotBarber ? ` with ${slotBarber}` : ""}` : "";
+    const slotDay = slotLabel ? slotLabel.slice(0, 3) : "";
+
     const maxTotal = Math.min(Math.max(Number(body.max_chars) || DEFAULT_MAX, 60), 140);
     const copyMax = maxTotal - BOOKING_LINK.length - 1; // room for " " + link
 
@@ -128,8 +139,9 @@ Client type: ${state}
 Days since last visit: ${daysOverdue} (about ${Math.round(daysOverdue / 7)} weeks)
 Total visits: ${visits}
 Offer you may mention: ${offer || "NONE - do not mention any discount, price or offer"}
+Open spot you may offer: ${slotText || "NONE - do not mention any specific day, time or availability"}
 
-Strategy: ${strategy}
+Strategy: ${slotText ? "A specific spot has just opened up. Offer it plainly with light urgency (spots go fast). Use the day and time exactly as given. No discount." : strategy}
 
 Maximum ${copyMax} characters. Do not include a link. Return only the message.`;
 
@@ -137,16 +149,16 @@ Maximum ${copyMax} characters. Do not include a link. Return only the message.`;
     let source: "ai" | "fallback" = "ai";
     try {
       text = clean(await callModel(SYSTEM_PROMPT, userPrompt));
-      let issues = problems(text, firstName, copyMax, offer);
+      let issues = problems(text, firstName, copyMax, offer, slotDay);
       if (issues.length) {
         const retry = `${userPrompt}\n\nYour previous attempt was rejected: ${issues.join("; ")}.\nPrevious attempt: "${text}"\nRewrite it fixing every issue.`;
         text = clean(await callModel(SYSTEM_PROMPT, retry));
-        issues = problems(text, firstName, copyMax, offer);
+        issues = problems(text, firstName, copyMax, offer, slotDay);
       }
       if (issues.length) throw new Error(`Rejected after retry: ${issues.join("; ")}`);
     } catch (err) {
       console.error("[SMS AI] Using fallback template:", err instanceof GatewayError ? err.message : err);
-      text = fallbackMessage(state, firstName);
+      text = fallbackMessage(state, firstName, slotText);
       if (text.length > copyMax) text = text.slice(0, copyMax).trimEnd();
       source = "fallback";
     }

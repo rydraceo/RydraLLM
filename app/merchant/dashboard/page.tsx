@@ -6,6 +6,7 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveCo
 import { AuroraBackground, CountUp } from "@/app/components/fx";
 import { useCopilotActions } from "@/lib/ai/bus";
 import { aiFetch } from "@/lib/ai/client";
+import BulkSendModal from "@/app/components/bulk-send";
 import type { CopilotAction } from "@/lib/ai/types";
  
 interface Customer {
@@ -17,7 +18,20 @@ interface Customer {
   sms_status?: string; sms_blocked?: boolean;
 }
 interface ChatMessage { role: "user" | "assistant"; content: string; }
-interface Recommendation { title: string; description: string; impact: string; actionLabel: string; confidence?: number; }
+interface Recommendation { title: string; description: string; impact: string; actionLabel: string; confidence?: number; audience?: Audience; }
+type Audience = "at_risk" | "churned" | "first_timers" | "on_fence" | "loyal";
+const AUD_STATE: Record<Audience, string> = { at_risk: "R_at_risk", churned: "X", first_timers: "C", on_fence: "R_on_fence", loyal: "R_loyal" };
+const AUD_HEX: Record<Audience, string> = { at_risk: "#F43F5E", churned: "#FB923C", first_timers: "#38BDF8", on_fence: "#7C3AED", loyal: "#34D399" };
+const AUD_LABEL: Record<Audience, string> = { at_risk: "At-risk regulars", churned: "Churned clients", first_timers: "First-timers", on_fence: "On the fence", loyal: "Loyal clients" };
+function audienceOf(rec: Recommendation): Audience {
+  if (rec.audience && rec.audience in AUD_STATE) return rec.audience;
+  const t = `${rec.title} ${rec.description}`.toLowerCase();
+  if (/first[- ]?time|new client|rebook/.test(t)) return "first_timers";
+  if (/churn|lapsed|win[- ]?back|miss you/.test(t)) return "churned";
+  if (/fence|nudge/.test(t)) return "on_fence";
+  if (/loyal|apprecia/.test(t)) return "loyal";
+  return "at_risk";
+}
 interface Summary { total: number; intervention_ready: number; total_intervention_value: number; sms_blocked?: number; sms_status_counts?: Record<string, number>; }
 type MarkovState = "C" | "X" | "R_at_risk" | "R_on_fence" | "R_loyal";
  
@@ -328,9 +342,9 @@ function formatMsg(content: string) {
  
 const SUGGESTED_PROMPTS = ["Who are my top 5 at-risk customers?", "Total CLV of on-fence clients?", "How many are intervention-ready?", "Who has the highest churn score?", "Clients not visited in 90+ days?", "Revenue breakdown by segment?", "Overall health summary"];
 const FALLBACK_RECS: Recommendation[] = [
-  { title: "Target At-Risk Segment", description: "Deploy personalised SMS to customers with gap_ratio > 1.3. Prioritise top 5 by CLV. Use scarcity framing and $10–20 offer.", impact: "+$840 recoverable", actionLabel: "Launch Campaign", confidence: 0.85 },
-  { title: "Win Back Churned Clients", description: "$20 discount to clients lapsed 112+ days. Loss aversion framing outperforms discounting alone by 34%.", impact: "+$420 recoverable", actionLabel: "Create Offer", confidence: 0.72 },
-  { title: "First-Timer Rebooking", description: "Book second appointment at day 35–45 before habit breaks. No discount needed. Single SMS achieves 45% conversion.", impact: "+18% conversion", actionLabel: "Send SMS", confidence: 0.91 },
+  { title: "Target At-Risk Segment", description: "Deploy personalised SMS to customers with gap_ratio > 1.3. Prioritise top 5 by CLV. Use scarcity framing and $10–20 offer.", impact: "+$840 recoverable", actionLabel: "Launch Campaign", confidence: 0.85, audience: "at_risk" },
+  { title: "Win Back Churned Clients", description: "$20 discount to clients lapsed 112+ days. Loss aversion framing outperforms discounting alone by 34%.", impact: "+$420 recoverable", actionLabel: "Create Offer", confidence: 0.72, audience: "churned" },
+  { title: "First-Timer Rebooking", description: "Book second appointment at day 35–45 before habit breaks. No discount needed. Single SMS achieves 45% conversion.", impact: "+18% conversion", actionLabel: "Send SMS", confidence: 0.91, audience: "first_timers" },
 ];
  
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
@@ -354,17 +368,54 @@ export default function DashboardPage() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const VENUE_ID = process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID || "e1a6c15d-8ccc-4f58-aefb-8bea46e39918";
  
+  const [bucket, setBucket] = useState<"all" | "atRisk" | "onFence" | "loyal">("all");
+  const [lastSync, setLastSync] = useState<number | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [stale, setStale] = useState(false);
+  const [, setTick] = useState(0);
+  const inFlight = useRef(false);
+  const [aud, setAud] = useState<Audience | null>(null);
+  const [bulkAud, setBulkAud] = useState<Audience | null>(null);
+  const [bulkSeg, setBulkSeg] = useState<null | "atRisk" | "onFence" | "loyal">(null);
+
+  // Loads the client list. silent=true is a background refresh: no spinner, and a failure keeps the data on screen.
+  async function loadCustomers(silent = false) {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    if (silent) setSyncing(true);
+    try {
+      const r = await aiFetch(`/api/intelligence/at-risk-customers?venue_id=${VENUE_ID}`);
+      const d = await r.json();
+      if (!r.ok || d.error) throw new Error(d.details || d.error || "Failed to load customers");
+      setCustomers(d.customers || []);
+      setSummary(d.summary || null);
+      setLastSync(Date.now());
+      setStale(false);
+      setLoadError("");
+    } catch (e: any) {
+      console.error(e);
+      if (silent) setStale(true); else setLoadError(e.message || "Failed to load customers");
+    } finally {
+      inFlight.current = false;
+      setSyncing(false);
+      setLoading(false);
+    }
+  }
+
+  // Live data: refresh every 60s while the tab is visible, and straight away when you come back to it.
   useEffect(() => {
-    aiFetch(`/api/intelligence/at-risk-customers?venue_id=${VENUE_ID}`)
-      .then(async r => {
-        const d = await r.json();
-        if (!r.ok || d.error) throw new Error(d.details || d.error || "Failed to load customers");
-        setCustomers(d.customers || []);
-        setSummary(d.summary || null);
-      })
-      .catch(e => { console.error(e); setLoadError(e.message || "Failed to load customers"); })
-      .finally(() => setLoading(false));
+    loadCustomers();
+    const poll = setInterval(() => { if (!document.hidden) loadCustomers(true); }, 60_000);
+    const onVisible = () => { if (!document.hidden) loadCustomers(true); };
+    document.addEventListener("visibilitychange", onVisible);
+    const tick = setInterval(() => setTick(t => t + 1), 15_000); // keeps "updated Xs ago" honest
+    return () => { clearInterval(poll); clearInterval(tick); document.removeEventListener("visibilitychange", onVisible); };
   }, []);
+  function agoLabel() {
+    if (!lastSync) return "loading";
+    const sec = Math.max(0, Math.round((Date.now() - lastSync) / 1000));
+    return sec < 10 ? "just now" : sec < 60 ? `${sec}s ago` : `${Math.floor(sec / 60)}m ago`;
+  }
   useEffect(() => { if (customers.length > 0 && recs.length === 0) generateRecs(); }, [customers]);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chat, chatLoading]);
 
@@ -386,7 +437,7 @@ export default function DashboardPage() {
   }
   useCopilotActions((a: CopilotAction) => {
     if (a.type === "set_filters") {
-      if (a.segment !== undefined) setFilterSeg(a.segment);
+      if (a.segment !== undefined) { setFilterSeg(a.segment); setBucket("all"); }
       if (a.sms_status !== undefined) setFilterSms(a.sms_status);
       if (a.search !== undefined) setSearch(a.search);
       scrollWhenReady("client-table");
@@ -399,15 +450,23 @@ export default function DashboardPage() {
   });
   useEffect(() => { openPendingSms(); }, [customers]);
  
-  async function generateRecs() {
-    setLoadingRecs(true);
+  async function generateRecs(silent = false) {
+    if (!silent) setLoadingRecs(true);
     try {
       const res = await aiFetch("/api/ai/insights", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ venue_id: VENUE_ID, type: "recommendations" }) });
       const data = await res.json();
       const r = (data.recommendations || []).map((x: Recommendation, i: number) => ({ ...x, confidence: x.confidence ?? [0.85, 0.72, 0.91][i % 3] }));
       setRecs(r.length > 0 ? r : FALLBACK_RECS);
-    } catch { setRecs(FALLBACK_RECS); } finally { setLoadingRecs(false); }
+    } catch { if (!silent) setRecs(FALLBACK_RECS); } finally { setLoadingRecs(false); }
   }
+  // Recommendations re-run every 15 minutes while the tab is open (data refreshes every minute).
+  useEffect(() => {
+    const t = setInterval(() => { if (!document.hidden && customers.length > 0) generateRecs(true); }, 15 * 60_000);
+    return () => clearInterval(t);
+  }, [customers.length]);
+  const audList = (a: Audience) => customers.filter(c => (c.markov_state || deriveMarkovState(c)) === AUD_STATE[a]);
+  const audReachable = (a: Audience) => audList(a).filter(c => !c.sms_blocked && c.phone).length;
+  function viewAudience(a: Audience) { setAud(a); setBucket("all"); setFilterSeg("all"); setFilterSms("all"); setSearch(""); scrollWhenReady("client-table"); }
  
   async function sendChat(message: string) {
     if (!message.trim() || chatLoading) return;
@@ -438,15 +497,25 @@ export default function DashboardPage() {
   const filtered = useMemo(() => {
     let f = customers.filter(c => c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search) || (c.email && c.email.toLowerCase().includes(search.toLowerCase())));
     if (filterSeg !== "all") f = f.filter(c => c.risk_segment === filterSeg);
+    if (aud) f = f.filter(c => (c.markov_state || deriveMarkovState(c)) === AUD_STATE[aud]);
+    if (bucket === "atRisk") f = f.filter(c => c.gap_ratio > 1.5);
+    else if (bucket === "onFence") f = f.filter(c => c.gap_ratio > 0.5 && c.gap_ratio <= 1.5);
+    else if (bucket === "loyal") f = f.filter(c => c.gap_ratio <= 0.5);
     if (filterSms === "blocked") f = f.filter(c => c.sms_blocked);
     else if (filterSms !== "all") f = f.filter(c => (c.sms_status ?? "unknown") === filterSms);
     return [...f].sort((a, b) => b.intervention_value - a.intervention_value);
-  }, [customers, search, filterSeg, filterSms]);
+  }, [customers, search, filterSeg, filterSms, bucket, aud]);
  
   const paginated  = useMemo(() => filtered.slice((curPage - 1) * perPage, curPage * perPage), [filtered, curPage, perPage]);
   const totalPages = Math.ceil(filtered.length / perPage);
-  useEffect(() => setCurPage(1), [search, filterSeg, filterSms]);
+  useEffect(() => setCurPage(1), [search, filterSeg, filterSms, bucket, aud]);
  
+  // Segment cards: clicking a card filters the table to it; the button opens the bulk composer,
+  // where you pick how many clients and RydraAI writes a personalised message for each.
+  function segmentAction(key: "atRisk" | "onFence" | "loyal") {
+    setAud(null); setBucket(key); setFilterSeg("all"); setFilterSms("all"); setSearch("");
+    setBulkSeg(key);
+  }
   const riskColor = (g: number) => g > 1.5 ? "#F43F5E" : g > 0.5 ? "#FB923C" : "#34D399";
   const riskLabel = (g: number) => g > 1.5 ? "Critical" : g > 0.5 ? "At Risk" : "Stable";
  
@@ -463,6 +532,15 @@ export default function DashboardPage() {
     <div className={`min-h-screen ${BG} text-white pb-16`} style={{ isolation: "isolate" }}>
       <AuroraBackground />
       {selectedCustomer && <SmsDrawer key={selectedCustomer.user_id} customer={selectedCustomer} initialText={draftText} onClose={() => { setSelectedCustomer(null); setDraftText(""); }} />}
+      {bulkAud && (
+        <BulkSendModal customers={audList(bulkAud)} label={AUD_LABEL[bulkAud]} hex={AUD_HEX[bulkAud]} maxChars={SMS_BODY_MAX} venueId={process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID}
+          onClose={() => setBulkAud(null)} onSent={() => loadCustomers(true)} />
+      )}
+      {bulkSeg && (() => {
+        const meta = bulkSeg === "atRisk" ? { l: "At Risk", h: "#F43F5E", list: atRisk } : bulkSeg === "onFence" ? { l: "On Fence", h: PUR_L, list: onFence } : { l: "Loyal", h: "#34D399", list: loyal };
+        return <BulkSendModal customers={meta.list} label={meta.l} hex={meta.h} maxChars={SMS_BODY_MAX} venueId={process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID}
+          onClose={() => setBulkSeg(null)} onSent={() => loadCustomers(true)} />;
+      })()}
  
       {/* ── Navigation ── */}
       <div className="border-b backdrop-blur-xl sticky top-0 z-30" style={{ background: NAV_BG, borderColor: "#2A1852" }}>
@@ -489,12 +567,20 @@ export default function DashboardPage() {
               </a>
             ))}
           </nav>
+          <div className="flex items-center gap-3 flex-shrink-0">
+          <button onClick={() => loadCustomers(true)} title="Refresh now"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] transition-all"
+            style={{ color: stale ? "#FB923C" : "#6B5C8A", border: "1px solid #2A1852" }}>
+            <span className={`w-1.5 h-1.5 rounded-full ${syncing ? "animate-ping" : "animate-pulse"}`} style={{ background: stale ? "#FB923C" : "#34D399" }} />
+            {stale ? "Reconnecting…" : `Live · ${agoLabel()}`}
+          </button>
           <button onClick={() => window.dispatchEvent(new Event("rydra:toggle-copilot"))}
             className="flex-shrink-0 flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all"
             style={{ background: "rgba(212,160,23,0.1)", border: "1px solid rgba(212,160,23,0.35)", color: GOLD }}>
             <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: GOLD }} />
             Ask RydraAI
           </button>
+          </div>
         </div>
       </div>
  
@@ -574,7 +660,7 @@ export default function DashboardPage() {
               <div className="text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: GOLD2 }}>AI Intelligence</div>
               <h2 className="text-base font-semibold text-white">Recommended Actions</h2>
             </div>
-            <button onClick={generateRecs} disabled={loadingRecs}
+            <button onClick={() => generateRecs()} disabled={loadingRecs}
               className="flex items-center gap-2 px-3.5 py-1.5 rounded-md text-[11px] font-medium border transition-all disabled:opacity-40"
               style={{ borderColor: "#3A2268", color: "#A78BFA", background: "#1A1030" }}>
               <svg className={`w-3.5 h-3.5 ${loadingRecs ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
@@ -600,10 +686,20 @@ export default function DashboardPage() {
                     {rec.impact}
                   </div>
                   <ConfBar pct={Math.round((rec.confidence ?? 0.75) * 100)} />
-                  <button className="w-full py-2 rounded-md text-[11px] font-semibold uppercase tracking-wider transition-all"
-                    style={{ background: "rgba(91,33,182,0.15)", border: "1px solid rgba(91,33,182,0.3)", color: PUR_LL }}>
-                    {rec.actionLabel}
-                  </button>
+                  {(() => {
+                    const a = audienceOf(rec); const n = audReachable(a);
+                    return (
+                      <div>
+                        <div className="text-[10px] mb-2" style={{ color: "#6B5C8A" }}>{AUD_LABEL[a]} · {n.toLocaleString()} reachable now</div>
+                        <button onClick={() => setBulkAud(a)} disabled={n === 0}
+                          className="w-full py-2 rounded-md text-[11px] font-semibold uppercase tracking-wider transition-all hover:brightness-125 disabled:opacity-40"
+                          style={{ background: `${AUD_HEX[a]}22`, border: `1px solid ${AUD_HEX[a]}55`, color: "#E9E3FF" }}>
+                          {rec.actionLabel}
+                        </button>
+                        <button onClick={() => viewAudience(a)} className="w-full mt-1.5 text-[10px] underline-offset-2 hover:underline" style={{ color: PUR_LL }}>View these clients</button>
+                      </div>
+                    );
+                  })()}
                 </div>
               ))}
             </div>
@@ -725,11 +821,15 @@ export default function DashboardPage() {
           <div className="text-sm font-semibold text-white mb-5">Customer Risk & Opportunity</div>
           <div className="grid grid-cols-3 gap-4">
             {[
-              { label: "At Risk",   pct: Math.round(atRisk.length/n*100),  count: atRisk.length,  desc: "High churn probability. Intervention window closing.",             hex: "#F43F5E", action: "Target Now",  discount: "Use $10–20 offer" },
-              { label: "On Fence",  pct: Math.round(onFence.length/n*100), count: onFence.length, desc: "Convertible with a single touch. Highest ROI segment.",             hex: PUR_L,    action: "Send Nudge", discount: "No discount needed" },
-              { label: "Loyal",     pct: Math.round(loyal.length/n*100),   count: loyal.length,   desc: "Reliable revenue base. Never discount. Protect with appreciation.", hex: "#34D399", action: "Appreciate", discount: "No discount — ever" },
-            ].map(({ label, pct, count, desc, hex, action, discount }) => (
-              <div key={label} className={`${CARD2} border rounded-xl p-5`} style={{ borderColor: `${hex}20` }}>
+              { key: "atRisk" as const,  label: "At Risk",   pct: Math.round(atRisk.length/n*100),  count: atRisk.length,  desc: "High churn probability. Intervention window closing.",             hex: "#F43F5E", action: "Target Now",  discount: "Use $10–20 offer" },
+              { key: "onFence" as const, label: "On Fence",  pct: Math.round(onFence.length/n*100), count: onFence.length, desc: "Convertible with a single touch. Highest ROI segment.",             hex: PUR_L,    action: "Send Nudge", discount: "No discount needed" },
+              { key: "loyal" as const,   label: "Loyal",     pct: Math.round(loyal.length/n*100),   count: loyal.length,   desc: "Reliable revenue base. Never discount. Protect with appreciation.", hex: "#34D399", action: "Appreciate", discount: "No discount — ever" },
+            ].map(({ key, label, pct, count, desc, hex, action, discount }) => (
+              <div key={label} role="button" tabIndex={0}
+                onClick={() => { setAud(null); setBucket(b => b === key ? "all" : key); scrollWhenReady("client-table"); }}
+                onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setBucket(b => b === key ? "all" : key); scrollWhenReady("client-table"); } }}
+                className={`${CARD2} border rounded-xl p-5 cursor-pointer transition-all hover:-translate-y-0.5`}
+                style={{ borderColor: bucket === key ? hex : `${hex}20`, boxShadow: bucket === key ? `0 0 0 1px ${hex}, 0 8px 30px ${hex}22` : undefined }}>
                 <div className="flex items-start justify-between mb-4">
                   <div>
                     <div className="text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: hex }}>{label}</div>
@@ -741,12 +841,12 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <div className="h-[2px] rounded-full mb-4" style={{ background: "#2A1852" }}>
-                  <div className="h-full rounded-full" style={{ width: `${pct}%`, background: hex }} />
+                  <div className="h-full rounded-full" style={{ width: `${pct}%`, background: hex, transition: "width 0.8s ease" }} />
                 </div>
                 <p className="text-xs leading-relaxed mb-3" style={{ color: "#A78BFA" }}>{desc}</p>
                 <div className="flex items-center justify-between">
                   <div className="text-[10px]" style={{ color: "#6B5C8A" }}>{discount}</div>
-                  <button className="text-[10px] font-semibold px-3 py-1.5 rounded-md transition-all" style={{ background: `${hex}12`, border: `1px solid ${hex}25`, color: hex }}>{action}</button>
+                  <button onClick={e => { e.stopPropagation(); segmentAction(key); }} className="text-[10px] font-semibold px-3 py-1.5 rounded-md transition-all hover:brightness-125" style={{ background: `${hex}12`, border: `1px solid ${hex}25`, color: hex }}>{action}</button>
                 </div>
               </div>
             ))}
@@ -755,6 +855,18 @@ export default function DashboardPage() {
  
         {/* ── Search & Table ── */}
         <div id="client-table" className="flex gap-3 mb-4 scroll-mt-20">
+          {aud && (
+            <button onClick={() => setAud(null)} className="flex-shrink-0 rounded-md px-3 py-2 text-xs font-semibold flex items-center gap-2"
+              style={{ background: `${AUD_HEX[aud]}22`, border: `1px solid ${AUD_HEX[aud]}66`, color: "#E9E3FF" }}>
+              {AUD_LABEL[aud]} · {filtered.length.toLocaleString()} <span aria-hidden>✕</span>
+            </button>
+          )}
+          {bucket !== "all" && (
+            <button onClick={() => setBucket("all")} className="flex-shrink-0 rounded-md px-3 py-2 text-xs font-semibold flex items-center gap-2"
+              style={{ background: "rgba(124,58,237,0.15)", border: "1px solid rgba(167,139,250,0.4)", color: "#C4B5FD" }}>
+              {bucket === "atRisk" ? "At Risk" : bucket === "onFence" ? "On Fence" : "Loyal"} · {filtered.length.toLocaleString()} <span aria-hidden>✕</span>
+            </button>
+          )}
           <input type="text" placeholder="Search clients by name, phone, or email..." value={search} onChange={e => setSearch(e.target.value)}
             className="flex-1 rounded-md px-4 py-2 text-sm text-white placeholder-[#6B5C8A] focus:outline-none transition-all"
             style={{ background: "#0F0A1E", border: "1px solid #2A1852" }} />

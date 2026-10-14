@@ -1,106 +1,69 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { ask } from "@/lib/llm/gateway";
- 
-// ─── POST: Given a cancelled slot datetime, rank clients and generate messages ─
-export async function POST(req: NextRequest) {
-  const { venue_id, slot_datetime, slot_barber } = await req.json();
- 
-  if (!venue_id || !slot_datetime) {
-    return NextResponse.json({ error: "venue_id and slot_datetime required" }, { status: 400 });
-  }
- 
-  const slotDate = new Date(slot_datetime);
-  const slotDateLabel = slotDate.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" });
-  const slotTime = slotDate.toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit", hour12: true });
- 
+import { authorize, rateLimited, DENIED_MESSAGE } from "@/lib/ai/access";
+import { buildForecast, fallbackInsight, insightFacts, type Forecast } from "@/lib/forecast/demand";
+
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
+// GET /api/intelligence/demand-heatmap            -> the 6-week forecast (cached 5 min)
+// GET /api/intelligence/demand-heatmap?part=insight -> a short AI read of it (cached 30 min)
+// Add &refresh=1 to bypass the cache.
+
+const FORECAST_TTL = 5 * 60_000;
+const INSIGHT_TTL = 30 * 60_000;
+let forecastCache: { at: number; key: string; data: Forecast } | null = null;
+let insightCache: { at: number; key: string; text: string; source: "ai" | "data" } | null = null;
+
+async function getForecast(venueId: string, businessId: string, refresh: boolean): Promise<Forecast> {
+  const key = `${venueId}:${businessId}`;
+  if (!refresh && forecastCache && forecastCache.key === key && Date.now() - forecastCache.at < FORECAST_TTL) return forecastCache.data;
+  const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+  const data = await buildForecast(supabase, venueId, businessId);
+  forecastCache = { at: Date.now(), key, data };
+  return data;
+}
+
+// Every number in the AI's answer must come from the facts we gave it; otherwise we use the data-only text.
+function numbersAreGrounded(text: string, facts: unknown): boolean {
+  const allowed = new Set((JSON.stringify(facts).match(/\d+(?:\.\d+)?/g) ?? []));
+  return (text.match(/\d+(?:\.\d+)?/g) ?? []).every((n) => allowed.has(n));
+}
+
+export async function GET(req: NextRequest) {
+  if (!authorize(req)) return NextResponse.json({ error: DENIED_MESSAGE }, { status: 401 });
+  if (rateLimited(req, 30)) return NextResponse.json({ error: "Slow down a little. Try again in a minute." }, { status: 429 });
+
+  const venueId = process.env.ALKAMI_VENUE_ID || process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID;
+  const businessId = process.env.ALKAMI_BUSINESS_ID;
+  if (!venueId || !businessId) return NextResponse.json({ error: "Server misconfigured: ALKAMI_VENUE_ID or ALKAMI_BUSINESS_ID missing." }, { status: 503 });
+
+  const refresh = req.nextUrl.searchParams.get("refresh") === "1";
   try {
-    // 1. Fetch at-risk clients using the working endpoint
-    const host = req.headers.get("host") || "localhost:3000";
-    const proto = process.env.NODE_ENV === "production" ? "https" : "http";
-    const atRiskRes = await fetch(
-      `${proto}://${host}/api/intelligence/at-risk-customers?venue_id=${venue_id}`
-    );
-    if (!atRiskRes.ok) throw new Error("Failed to fetch at-risk customers");
-    const atRiskData = await atRiskRes.json();
- 
-    const allClients: any[] = atRiskData.customers || [];
- 
-    // 2. Filter: must have phone, must be actionable state
-    const eligible = allClients.filter(
-      c => c.phone && c.phone !== "No phone" &&
-      ["R_at_risk", "R_on_fence", "X", "C"].includes(c.markov_state)
-    );
- 
-    if (!eligible.length) {
-      return NextResponse.json({ clients: [], slot_label: `${slotDateLabel} at ${slotTime}`, total_candidates: 0 });
+    const f = await getForecast(venueId, businessId, refresh);
+
+    if (req.nextUrl.searchParams.get("part") === "insight") {
+      const key = `${venueId}:${f.generated_at}`;
+      if (!refresh && insightCache && insightCache.key.startsWith(`${venueId}:`) && Date.now() - insightCache.at < INSIGHT_TTL)
+        return NextResponse.json({ ai_insight: insightCache.text, source: insightCache.source });
+      const facts = insightFacts(f);
+      let text = "", source: "ai" | "data" = "ai";
+      const raw = await ask({
+        system: "You are the demand analyst for Alkami Barbershop in Canberra. Write 2 or 3 short sentences for the owner: which days are quiet, which clients could fill them, and one specific action. Use ONLY the facts provided. Do not invent numbers, names or causes. Plain text, Australian English, no markdown, no emoji.",
+        user: `Facts (JSON):\n${JSON.stringify(facts)}`, maxTokens: 220, temperature: 0.4,
+      });
+      if (raw && raw.length <= 600 && numbersAreGrounded(raw, facts)) text = raw.replace(/\s+/g, " ").trim();
+      else { text = fallbackInsight(f); source = "data"; }
+      insightCache = { at: Date.now(), key, text, source };
+      return NextResponse.json({ ai_insight: text, source });
     }
- 
-    // 3. Score and rank: ΔV × urgency multiplier × state boost
-    const scored = eligible
-      .map(c => {
-        const iv = Number(c.intervention_value || 0);
-        const urgency = c.days_overdue > 90 ? 1.5 : c.days_overdue > 45 ? 1.2 : 1.0;
-        const stateBoost = c.markov_state === "R_at_risk" ? 1.3
-          : c.markov_state === "X" ? 1.4
-          : c.markov_state === "R_on_fence" ? 1.1 : 1.0;
-        return { ...c, slot_score: Math.round(iv * urgency * stateBoost * 10) };
-      })
-      .sort((a, b) => b.slot_score - a.slot_score)
-      .slice(0, 5);
- 
-    // 4. Generate personalised slot-fill SMS for top 3
-    const clients = await Promise.all(
-      scored.slice(0, 3).map(async (client) => {
-        const firstName = client.name?.split(" ")[0] || "mate";
-        let message = `Hey ${firstName}, a spot just opened up ${slotDateLabel} at ${slotTime}${slot_barber ? ` with ${slot_barber}` : ""}. Want it? Reply YES to lock it in — Alkami.`;
- 
-        try {
-          const aiMsg = await ask({ user: `Write a short SMS (max 130 chars) for a barbershop client named ${firstName} offering a last-minute appointment slot.
- 
-Details:
-- Slot: ${slotDateLabel} at ${slotTime}${slot_barber ? ` with ${slot_barber}` : ""}
-- Client situation: ${client.days_overdue} days since last visit, ${
-  client.markov_state === "R_at_risk" ? "at risk of churning" :
-  client.markov_state === "X" ? "churned — needs win-back" :
-  client.markov_state === "R_on_fence" ? "visits occasionally" : "first timer"
-}
- 
-Rules:
-- Start with "Hey ${firstName},"
-- Say "a spot just opened up" (not "cancellation")
-- Include date and time naturally
-- End with "Reply YES to lock it in"
-- Under 130 characters TOTAL
-- No URLs, no hashtags
- 
-Return ONLY the SMS text.`, maxTokens: 80, temperature: 0.7 });
-          if (aiMsg && aiMsg.length <= 160) message = aiMsg;
-        } catch { /* use fallback */ }
- 
-        return {
-          user_id: client.user_id,
-          name: client.name,
-          phone: client.phone,
-          markov_state: client.markov_state,
-          days_overdue: client.days_overdue,
-          intervention_value: Number(client.intervention_value || 0),
-          potential_value: client.potential_value,
-          slot_score: client.slot_score,
-          message,
-          message_length: message.length,
-        };
-      })
-    );
- 
+
     return NextResponse.json({
-      slot_datetime,
-      slot_label: `${slotDateLabel} at ${slotTime}`,
-      clients,
-      total_candidates: eligible.length,
+      heatmap: f.days, opportunities: f.opportunities, profile: f.profile, totals: f.totals, generated_at: f.generated_at,
     });
- 
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error("[demand-heatmap]", err);
+    return NextResponse.json({ error: "Could not build the forecast." }, { status: 500 });
   }
 }
- 

@@ -23,6 +23,8 @@ export type CopilotCustomer = {
   intervention_value_aud: number; // 0 if the client cannot be messaged
   sms_status: SmsStatus;
   last_visit: string | null;
+  last_visit_local: string | null; // YYYY-MM-DD in Sydney time (use this for weekday maths)
+  avg_gap_days: number; // 0 when unknown
 };
 
 // ─── Scoring (same constants as the dashboard route) ─────────────────────────
@@ -119,6 +121,8 @@ export async function getCustomers(supabase: SupabaseClient, venueId: string, bu
       intervention_value_aud: sms_status === "ok" ? Math.round(ivRaw * 100) / 100 : 0,
       sms_status,
       last_visit: r.last_event_at ? String(r.last_event_at).slice(0, 10) : null,
+      last_visit_local: Number.isFinite(lastMs) ? new Date(lastMs).toLocaleDateString("en-CA", { timeZone: "Australia/Sydney" }) : null,
+      avg_gap_days: Math.max(0, Math.round(Number(r.avg_visit_gap_days) || 0)),
     };
   });
 
