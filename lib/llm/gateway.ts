@@ -43,7 +43,7 @@ export function gatewayConfig(): string | Record<string, unknown> {
   const id = process.env.PORTKEY_CONFIG_ID?.trim();
   if (id) return id;
   const t = gatewayTargets();
-  return { strategy: { mode: 'fallback', on_status_codes: [408, 429, 500, 502, 503, 504, 529] }, targets: [t.primary, t.fallback] };
+  return { strategy: { mode: 'fallback', on_status_codes: [401, 402, 403, 404, 408, 429, 500, 502, 503, 504, 529] }, targets: [t.primary, t.fallback] };
 }
 
 export function describeGateway() {
@@ -91,4 +91,29 @@ export async function chat(o: { messages: ChatMsg[]; tools?: ToolDef[]; maxToken
     ? msg.tool_calls.filter((t: any) => t?.function?.name).map((t: any) => ({ id: String(t.id), type: 'function' as const, function: { name: String(t.function.name), arguments: String(t.function.arguments ?? '{}') } }))
     : [];
   return { text: typeof msg.content === 'string' ? msg.content.trim() : '', toolCalls, finishReason: String(choice?.finish_reason ?? ''), model: res?.model ? String(res.model) : null };
+}
+
+/**
+ * Simple text completion through the gateway (Portkey, with fallback).
+ * Returns the trimmed text, or null when the gateway fails or returns nothing, so callers can use their own
+ * data-only fallback. Use this for every "write me a short message" call instead of calling a provider directly.
+ */
+export async function ask(o: {
+  user?: string;
+  system?: string;
+  messages?: { role: 'user' | 'assistant'; content: string }[];
+  maxTokens?: number;
+  temperature?: number;
+}): Promise<string | null> {
+  const messages: ChatMsg[] = [];
+  if (o.system) messages.push({ role: 'system', content: o.system });
+  if (o.messages?.length) messages.push(...o.messages.map((m) => ({ role: m.role, content: m.content }) as ChatMsg));
+  if (o.user) messages.push({ role: 'user', content: o.user });
+  if (!messages.length) return null;
+  try {
+    const r = await chat({ messages, maxTokens: o.maxTokens, temperature: o.temperature });
+    return r.text || null;
+  } catch {
+    return null;
+  }
 }

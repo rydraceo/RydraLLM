@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ask } from "@/lib/llm/gateway";
  
 const SYSTEM_PROMPT = `You are an expert at configuring automated SMS intervention rules for barbershop client retention.
  
@@ -57,61 +58,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Description required" }, { status: 400 });
     }
  
-    const openaiKey = process.env.OPENAI_API_KEY;
-    const anthropicKey = process.env.ANTHROPIC_API_KEY;
- 
-    let ruleJson: string | null = null;
- 
-    // Try OpenAI first
-    if (openaiKey) {
-      try {
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
-          body: JSON.stringify({
-            model: "gpt-4o-mini",
-            messages: [
-              { role: "system", content: SYSTEM_PROMPT },
-              { role: "user", content: `Generate a rule for: "${description}"` },
-            ],
-            max_tokens: 600,
-            temperature: 0.3,
-            response_format: { type: "json_object" },
-          }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          ruleJson = data.choices[0].message.content;
-        }
-      } catch (e) {
-        console.error("[generate-rule] OpenAI failed:", e);
-      }
-    }
- 
-    // Fallback to Anthropic
-    if (!ruleJson && anthropicKey) {
-      try {
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
-          body: JSON.stringify({
-            model: "claude-haiku-4-5",
-            max_tokens: 600,
-            system: SYSTEM_PROMPT,
-            messages: [{ role: "user", content: `Generate a rule for: "${description}"` }],
-          }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          ruleJson = data.content[0].text;
-        }
-      } catch (e) {
-        console.error("[generate-rule] Anthropic failed:", e);
-      }
-    }
- 
+    const ruleJson = await ask({
+      system: SYSTEM_PROMPT + "\n\nRespond with a single JSON object only.",
+      user: `Generate a rule for: "${description}"`,
+      maxTokens: 600,
+      temperature: 0.3,
+    });
     if (!ruleJson) {
-      return NextResponse.json({ error: "AI generation failed — check API keys" }, { status: 500 });
+      return NextResponse.json({ error: "AI temporarily unavailable. Try again shortly." }, { status: 503 });
     }
  
     // Parse and validate

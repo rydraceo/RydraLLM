@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { ask } from "@/lib/llm/gateway";
  
 // ─── Markov State Deriver ─────────────────────────────────────────────────────
 function deriveMarkovState(visits: number, gap_ratio: number, state: string): string {
@@ -24,8 +25,6 @@ async function generatePersonalisedMessage(
   if (!template.includes("[NAME]") || template.length < 80) return baseMessage;
  
   // Otherwise, let AI write a unique version based on their data
-  const openaiKey = process.env.OPENAI_API_KEY;
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
  
   const STATE_STRATEGIES: Record<string, string> = {
     C:          "First visit done. Nudge for second appointment. No discount needed.",
@@ -56,30 +55,9 @@ Rules:
 Output ONLY the SMS. No quotes, no explanation.`;
  
   try {
-    if (openaiKey) {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
-        body: JSON.stringify({ model: "gpt-4o-mini", messages: [{ role: "user", content: prompt }], max_tokens: 80, temperature: 0.7 }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const msg = data.choices[0].message.content.trim().replace(/^["']|["']$/g, "");
-        if (msg.length <= 160) return msg;
-      }
-    }
-    if (anthropicKey) {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 80, messages: [{ role: "user", content: prompt }] }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const msg = data.content[0].text.trim().replace(/^["']|["']$/g, "");
-        if (msg.length <= 160) return msg;
-      }
-    }
+    const raw = await ask({ user: prompt, maxTokens: 80, temperature: 0.7 });
+    const msg = raw?.trim().replace(/^["']|["']$/g, "");
+    if (msg && msg.length <= 160) return msg;
   } catch (err) {
     console.error("[AutoEngine] AI generation failed:", err);
   }

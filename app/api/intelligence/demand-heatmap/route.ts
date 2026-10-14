@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ask } from "@/lib/llm/gateway";
  
 // ─── POST: Given a cancelled slot datetime, rank clients and generate messages ─
 export async function POST(req: NextRequest) {
@@ -54,18 +55,7 @@ export async function POST(req: NextRequest) {
         let message = `Hey ${firstName}, a spot just opened up ${slotDateLabel} at ${slotTime}${slot_barber ? ` with ${slot_barber}` : ""}. Want it? Reply YES to lock it in — Alkami.`;
  
         try {
-          const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-            },
-            body: JSON.stringify({
-              model: "gpt-4o-mini",
-              max_tokens: 80,
-              messages: [{
-                role: "user",
-                content: `Write a short SMS (max 130 chars) for a barbershop client named ${firstName} offering a last-minute appointment slot.
+          const aiMsg = await ask({ user: `Write a short SMS (max 130 chars) for a barbershop client named ${firstName} offering a last-minute appointment slot.
  
 Details:
 - Slot: ${slotDateLabel} at ${slotTime}${slot_barber ? ` with ${slot_barber}` : ""}
@@ -83,12 +73,7 @@ Rules:
 - Under 130 characters TOTAL
 - No URLs, no hashtags
  
-Return ONLY the SMS text.`
-              }],
-            }),
-          });
-          const aiData = await aiRes.json();
-          const aiMsg = aiData.choices?.[0]?.message?.content?.trim();
+Return ONLY the SMS text.`, maxTokens: 80, temperature: 0.7 });
           if (aiMsg && aiMsg.length <= 160) message = aiMsg;
         } catch { /* use fallback */ }
  

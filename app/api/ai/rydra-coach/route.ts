@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ask } from "@/lib/llm/gateway";
  
 // ─── Scenario definitions ─────────────────────────────────────────────────────
  
@@ -269,51 +270,14 @@ export async function POST(request: NextRequest) {
       { role: "user", content: userMessage },
     ];
  
-    // OpenAI primary
-    const openaiKey = process.env.OPENAI_API_KEY;
-    if (openaiKey) {
-      try {
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
-          body: JSON.stringify({
-            model: "gpt-4o-mini",
-            messages: [{ role: "system", content: systemPrompt }, ...openaiMessages],
-            max_tokens: 500,
-            temperature: type === "roleplay" ? 0.9 : 0.75,
-          }),
-        });
-        if (!res.ok) throw new Error(`OpenAI: ${res.status}`);
-        const data = await res.json();
-        return NextResponse.json({ response: data.choices[0].message.content });
-      } catch (err) {
-        console.error("[RydraCoach] OpenAI failed:", err);
-      }
-    }
- 
-    // Anthropic fallback
-    const anthropicKey = process.env.ANTHROPIC_API_KEY;
-    if (anthropicKey) {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": anthropicKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: "claude-haiku-4-5",
-          max_tokens: 500,
-          system: systemPrompt,
-          messages: openaiMessages,
-        }),
-      });
-      if (!res.ok) throw new Error(`Anthropic: ${res.status}`);
-      const data = await res.json();
-      return NextResponse.json({ response: data.content[0].text });
-    }
- 
-    return NextResponse.json({ error: "No AI keys configured" }, { status: 503 });
+    const response = await ask({
+      system: systemPrompt,
+      messages: openaiMessages,
+      maxTokens: 500,
+      temperature: type === "roleplay" ? 0.9 : 0.75,
+    });
+    if (!response) return NextResponse.json({ error: "AI temporarily unavailable" }, { status: 503 });
+    return NextResponse.json({ response });
   } catch (error: any) {
     console.error("[RydraCoach]", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

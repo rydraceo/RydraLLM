@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ask } from "@/lib/llm/gateway";
  
 // ─── Scripts library ──────────────────────────────────────────────────────────
  
@@ -140,54 +141,9 @@ Keep it under 250 words. Conversational, direct, motivating.`;
       return NextResponse.json({ error: "type must be daily_brief or chat" }, { status: 400 });
     }
  
-    // OpenAI primary
-    const openaiKey = process.env.OPENAI_API_KEY;
-    if (openaiKey) {
-      try {
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
-          body: JSON.stringify({
-            model: "gpt-4o-mini",
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: userMessage },
-            ],
-            max_tokens: 600,
-            temperature: 0.8,
-          }),
-        });
-        if (!res.ok) throw new Error(`OpenAI: ${res.status}`);
-        const data = await res.json();
-        return NextResponse.json({ response: data.choices[0].message.content });
-      } catch (err) {
-        console.error("[BarberCoach] OpenAI failed:", err);
-      }
-    }
- 
-    // Anthropic fallback
-    const anthropicKey = process.env.ANTHROPIC_API_KEY;
-    if (anthropicKey) {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": anthropicKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: "claude-haiku-4-5",
-          max_tokens: 600,
-          system: systemPrompt,
-          messages: [{ role: "user", content: userMessage }],
-        }),
-      });
-      if (!res.ok) throw new Error(`Anthropic: ${res.status}`);
-      const data = await res.json();
-      return NextResponse.json({ response: data.content[0].text });
-    }
- 
-    return NextResponse.json({ error: "No AI keys configured" }, { status: 503 });
+    const response = await ask({ system: systemPrompt, user: userMessage, maxTokens: 600, temperature: 0.8 });
+    if (!response) return NextResponse.json({ error: "AI temporarily unavailable" }, { status: 503 });
+    return NextResponse.json({ response });
   } catch (error: any) {
     console.error("[BarberCoach]", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

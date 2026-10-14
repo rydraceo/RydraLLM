@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ask } from "@/lib/llm/gateway";
  
 export async function POST(request: NextRequest) {
   try {
@@ -36,32 +37,14 @@ RULES:
  
 Write ONLY the SMS message. Nothing else.`;
  
-    const openaiKey = process.env.OPENAI_API_KEY;
-    if (openaiKey) {
-      try {
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
-          body: JSON.stringify({ model: "gpt-4o-mini", messages: [{ role: "system", content: "SMS copywriter for barbershops. Concise, specific, effective." }, { role: "user", content: prompt }], max_tokens: 100, temperature: 0.8 }),
-        });
-        if (!res.ok) throw new Error(`${res.status}`);
-        const data = await res.json();
-        return NextResponse.json({ message: data.choices[0].message.content.trim(), strategy });
-      } catch (err) { console.error("[CampaignAI] OpenAI:", err); }
-    }
- 
-    const anthropicKey = process.env.ANTHROPIC_API_KEY;
-    if (anthropicKey) {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 100, messages: [{ role: "user", content: prompt }] }),
-      });
-      const data = await res.json();
-      return NextResponse.json({ message: data.content[0].text.trim(), strategy });
-    }
- 
-    return NextResponse.json({ error: "No AI keys" }, { status: 503 });
+    const message = await ask({
+      system: "SMS copywriter for barbershops. Concise, specific, effective.",
+      user: prompt,
+      maxTokens: 100,
+      temperature: 0.8,
+    });
+    if (!message) return NextResponse.json({ error: "AI temporarily unavailable" }, { status: 503 });
+    return NextResponse.json({ message: message.replace(/^["']|["']$/g, ""), strategy });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

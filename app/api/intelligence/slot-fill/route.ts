@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ask } from "@/lib/llm/gateway";
 import { createClient } from "@supabase/supabase-js";
  
 function supabase() {
@@ -79,18 +80,7 @@ export async function POST(req: NextRequest) {
           const firstName = client.name?.split(" ")[0] || "mate";
           const barberLine = slot_barber ? `with ${slot_barber} ` : "";
  
-          const res = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-            },
-            body: JSON.stringify({
-              model: "gpt-4o-mini",
-              max_tokens: 80,
-              messages: [{
-                role: "user",
-                content: `Write a short SMS (max 130 chars) for a barbershop client named ${firstName} offering a cancelled appointment slot.
+          message = (await ask({ user: `Write a short SMS (max 130 chars) for a barbershop client named ${firstName} offering a cancelled appointment slot.
  
 Slot: ${slotDateLabel} at ${slotTime}${slot_barber ? ` with ${slot_barber}` : ""}
 Client: ${client.days_overdue} days since last visit, ${client.markov_state === "R_at_risk" ? "at risk of churning" : client.markov_state === "X" ? "churned" : "occasional visitor"}
@@ -104,12 +94,7 @@ Rules:
 - DO NOT include a URL
 - Under 130 characters total
  
-Return only the SMS text, nothing else.`
-              }],
-            }),
-          });
-          const aiData = await res.json();
-          message = aiData.choices?.[0]?.message?.content?.trim() || "";
+Return only the SMS text, nothing else.`, maxTokens: 80, temperature: 0.7 })) || "";
         } catch {
           const firstName = client.name?.split(" ")[0] || "mate";
           message = `Hey ${firstName}, a spot just opened up ${slotDateLabel} at ${slotTime}. Want it? Reply YES to lock it in — Alkami.`;
