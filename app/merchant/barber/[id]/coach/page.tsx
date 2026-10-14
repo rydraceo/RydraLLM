@@ -1,371 +1,322 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+// RydraCoach 2.0: a game plan built from real clients, a practice arena with a live mood meter and scorecards,
+// a coach that can look up real data and stage texts, and scripts filled in with real dates.
+// The coach can never send anything itself: every text is reviewed and sent by a person, through the guarded SMS route.
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
+import { aiFetch } from "@/lib/ai/client";
 import { DiaryWidget } from "@/app/components/diary-widget";
- 
-const BG   = "bg-[#0A0612]";
-const CARD  = "bg-[#130C24]";
-const CARD2 = "bg-[#1A1030]";
-const BDR   = "border-[#2A1852]";
-const BDR2  = "border-[#3A2268]";
- 
-interface CoachMsg { role: "user"|"assistant"; content: string; type?: string; }
- 
+
+const GOLD = "#D4A017", PUR = "#5B21B6", PUR_L = "#7C3AED", PUR_LL = "#A78BFA", MUTED = "#6B5C8A", GREEN = "#34D399", RED = "#F43F5E";
+const CARD = "#130C24", CARD2 = "#1A1030", BDR = "#2A1852";
+const NAV = [
+  { href: "/merchant/dashboard", label: "Dashboard" }, { href: "/merchant/outreach", label: "Outreach" }, { href: "/merchant/campaign", label: "Campaign" },
+  { href: "/merchant/clients", label: "Clients" }, { href: "/merchant/barber", label: "Barbers", active: true },
+];
 const SCENARIOS = [
-  { id: "rebooking",   label: "Rebooking",    hex: "#F43F5E", desc: "Client just finished. Close the next booking.", opener: "Alright mate, heading off. Same time next month?" },
-  { id: "upsell",      label: "Upsell",       hex: "#FBBF24", desc: "Offer a treatment add-on mid-service.",          opener: "Just a cut today thanks, nothing extra." },
-  { id: "winback",     label: "Win-Back",      hex: "#FB923C", desc: "Client hasn't been in for 4+ months.",          opener: "Oh yeah it's been a while, been pretty flat out." },
-  { id: "firsttimer",  label: "First Timer",   hex: "#38BDF8", desc: "Brand new client, get the second booking.",     opener: "Yeah really happy with it, thanks man." },
-  { id: "retail",      label: "Retail Upsell", hex: "#A78BFA", desc: "Recommend a product during the cut.",           opener: "I don't really use product at home." },
+  { id: "rebooking", label: "Rebook in the chair", hex: RED, desc: "Cut's done. Lock in the next one." },
+  { id: "upsell", label: "Beard treatment", hex: "#FBBF24", desc: "Offer an add-on mid-cut." },
+  { id: "win_back", label: "Welcome back", hex: "#FB923C", desc: "A lapsed regular walks in." },
+  { id: "first_timer", label: "First-timer", hex: "#38BDF8", desc: "Win the second visit." },
+  { id: "retail", label: "Product sale", hex: PUR_LL, desc: "'What are you using?'" },
+  { id: "price", label: "Price objection", hex: "#F472B6", desc: "'Bit pricey, I'll think about it.'" },
+  { id: "complaint", label: "Cut isn't right", hex: "#94A3B8", desc: "Turn it around." },
 ];
- 
-const SCRIPTS = [
-  { title: "The Rebooking Close", hex: "#F43F5E", category: "Rebooking", script: `"Before you head off — let's get your next one locked in. Four weeks from today puts you on [date]. I've got 10am or 2pm — which works better for you?"`, psychology: "Two-option close creates a choice between two yeses, not a yes/no. Ask while client is still in the chair — compliance drops 60% once they leave.", target: "Use at the END of every appointment. Never miss this window." },
-  { title: "The Problem-Solution Upsell", hex: "#FBBF24", category: "Upsell", script: `"Your beard's looking a bit dry — I'll add a quick treatment. Takes about two minutes and makes the whole cut last way longer."`, psychology: "Observe the problem → state the benefit → pick up the product → assume the yes. Never ask 'would you like?'", target: "Use when you notice a skin or beard issue. Always frame as benefit." },
-  { title: "The Win-Back Message", hex: "#FB923C", category: "Win-Back", script: `"Hey [Name], JB here from Alkami — it's been a while, hope you're well. We've got a spot this week if you're keen to come in. Reply to lock it in."`, psychology: "Loss aversion: they already know you, trust you. Risk is low. Reminder of what they're missing is more powerful than a discount.", target: "Send to clients 90+ days overdue. Use their first name. Keep it short." },
-  { title: "The First-Timer Return", hex: "#38BDF8", category: "Retention", script: `"Really glad you came in. Let's make sure you get the same result every time — I've got [date] available in 4 weeks, want me to pencil you in before you go?"`, psychology: "New clients make rebooking decisions immediately after a great experience. Habit hasn't formed yet — this one conversation can be worth $2,000+ over 3 years.", target: "Say this before every first-timer leaves. No exceptions." },
-  { title: "The Product Hand-Off", hex: "#A78BFA", category: "Retail", script: `"This is what I used on your hair today — it's a [product name]. I'll grab you one from the shelf, it's $X. Makes the cut hold way longer at home."`, psychology: "Physical hand-off creates ownership before the sale. Let them hold it. People rarely hand things back.", target: "Hand the product to the client naturally during the cut. Mention price casually." },
-];
- 
-export default function RydraCoachPage() {
-  const params = useParams();
-  const router = useRouter();
-  const slug = params?.id as string;
-  const [barber, setBarber] = useState<any>(null);
-  const [stats, setStats] = useState<any>(null);
-  const [tab, setTab] = useState<"mission"|"arena"|"vault"|"chat"|"diary">("mission");
-  const [mission, setMission] = useState(""); const [missionLoading, setMissionLoading] = useState(false);
-  const [scenario, setScenario] = useState(SCENARIOS[0].id);
-  const [roleplayMsgs, setRoleplayMsgs] = useState<CoachMsg[]>([]);
-  const [roleplayInput, setRoleplayInput] = useState(""); const [roleplayLoading, setRoleplayLoading] = useState(false);
-  const [exchangeCount, setExchangeCount] = useState(0); const [feedback, setFeedback] = useState("");
-  const [chatMsgs, setChatMsgs] = useState<CoachMsg[]>([]); const [chatInput, setChatInput] = useState(""); const [chatLoading, setChatLoading] = useState(false);
-  const [expandedScript, setExpandedScript] = useState<string | null>(null);
-  const roleEndRef = useRef<HTMLDivElement>(null); const chatEndRef = useRef<HTMLDivElement>(null);
+type Staged = { user_id: string; name: string; message: string; reason: string; state?: "idle" | "sending" | "sent" | "failed"; note?: string };
+type Msg = { role: "user" | "assistant"; content: string; texts?: Staged[] };
+type Run = { at: string; scenario: string; label: string; difficulty: string; score: number };
+
+const store = {
+  get<T>(k: string, d: T): T { try { const v = localStorage.getItem(k); return v ? (JSON.parse(v) as T) : d; } catch { return d; } },
+  set(k: string, v: unknown) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+const todayKey = () => new Date().toLocaleDateString("en-CA", { timeZone: "Australia/Sydney" });
+const level = (xp: number) => { let l = 1, need = 100, left = xp; while (left >= need) { left -= need; l++; need = 100 + l * 40; } return { l, into: left, need }; };
+const title = (l: number) => (l >= 10 ? "Master barber" : l >= 7 ? "Closer" : l >= 4 ? "Sharp" : l >= 2 ? "Rising" : "Apprentice");
+
+function Md({ text }: { text: string }) {
+  return <div className="space-y-1.5 text-sm leading-relaxed">{text.split("\n").map((l, i) => { const t = l.trim(); if (!t) return <div key={i} className="h-1" />; const bullet = /^[-*•]\s+/.test(t); const body = t.replace(/^[-*•]\s+/, ""); const parts = body.split(/(\*\*[^*]+\*\*)/g).map((p, j) => p.startsWith("**") ? <strong key={j} className="text-white">{p.slice(2, -2)}</strong> : <span key={j}>{p}</span>); return <div key={i} className={bullet ? "flex gap-2" : ""}>{bullet && <span style={{ color: PUR_LL }}>•</span>}<div>{parts}</div></div>; })}</div>;
+}
+
+function Coach() {
+  const { id: slug } = useParams() as { id: string };
+  const sp = useSearchParams();
   const VENUE_ID = process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID || "e1a6c15d-8ccc-4f58-aefb-8bea46e39918";
- 
-  useEffect(() => { roleEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [roleplayMsgs]);
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMsgs]);
- 
-  useEffect(() => {
-    if (!slug) return;
-    fetch(`/api/barber/${slug}?venue_id=${VENUE_ID}`).then(r => r.json()).then(d => { setBarber(d.barber); setStats(d.stats); }).catch(console.error);
-  }, [slug]);
- 
-  async function generateMission() {
-    if (!barber || !stats) return;
+  const [tab, setTab] = useState<"today" | "arena" | "ask" | "vault" | "diary">("today");
+  const [info, setInfo] = useState<any>(null);
+  const [cfg, setCfg] = useState<{ body_max: number; booking_link: string } | null>(null);
+  const [err, setErr] = useState("");
+
+  // progress (per barber, this browser)
+  const [runs, setRuns] = useState<Run[]>([]);
+  const [tally, setTally] = useState<{ date: string; cuts: number; rebooked: number; upsold: number }>({ date: todayKey(), cuts: 0, rebooked: 0, upsold: 0 });
+
+  // today
+  const [mission, setMission] = useState<any>(null); const [missionText, setMissionText] = useState(""); const [missionLoading, setMissionLoading] = useState(false);
+  const [staged, setStaged] = useState<Staged[]>([]);
+
+  // arena
+  const [sid, setSid] = useState("rebooking"); const [diff, setDiff] = useState<"easy" | "normal" | "hard">("normal");
+  const [rp, setRp] = useState<Msg[]>([]); const [rpInput, setRpInput] = useState(""); const [rpLoading, setRpLoading] = useState(false);
+  const [mood, setMood] = useState<{ v: number; start: number } | null>(null); const [closed, setClosed] = useState(false); const [tip, setTip] = useState<string | null>(null); const [clientName, setClientName] = useState("Client");
+  const [card, setCard] = useState<any>(null); const [scoring, setScoring] = useState(false);
+  const [realId, setRealId] = useState(""); const [realName, setRealName] = useState("");
+  const [book, setBook] = useState<any[]>([]);
+
+  // ask
+  const [chat, setChat] = useState<Msg[]>([]); const [chatInput, setChatInput] = useState(""); const [chatLoading, setChatLoading] = useState(false);
+  const endRef = useRef<HTMLDivElement>(null); const rpEnd = useRef<HTMLDivElement>(null);
+
+  const first = info?.barber?.name?.split(" ")[0] ?? "";
+  const key = `rydra-coach-${slug}`;
+  const xp = runs.reduce((s, r) => s + Math.round(r.score / 2), 0);
+  const lv = level(xp);
+  const streak = useMemo(() => { const days = new Set(runs.map((r) => r.at.slice(0, 10))); let n = 0; const d = new Date(todayKey() + "T12:00:00Z"); if (!days.has(d.toISOString().slice(0, 10))) d.setUTCDate(d.getUTCDate() - 1); while (days.has(d.toISOString().slice(0, 10))) { n++; d.setUTCDate(d.getUTCDate() - 1); } return n; }, [runs]);
+
+  useEffect(() => { setRuns(store.get<Run[]>(`${key}-runs`, [])); const t = store.get<any>(`${key}-tally`, null); if (t && t.date === todayKey()) setTally(t); }, [key]);
+  useEffect(() => { store.set(`${key}-tally`, tally); }, [tally, key]);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chat]);
+  useEffect(() => { rpEnd.current?.scrollIntoView({ behavior: "smooth" }); }, [rp]);
+
+  useEffect(() => { (async () => { try { const r = await aiFetch(`/api/team/${slug}`); const j = await r.json(); if (!r.ok) throw new Error(j.error); setInfo(j); setBook(j.barber?.metrics?.book ?? []); setCfg({ body_max: j.config?.body_max ?? 100, booking_link: "" }); } catch (e: any) { setErr(e?.message || "Could not load this barber"); } })(); }, [slug]);
+
+  const api = useCallback(async (body: any) => { const r = await aiFetch("/api/ai/rydra-coach", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug, ...body }) }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || "Something went wrong"); return j; }, [slug]);
+  const stage = (ts: any[] | undefined, c: any) => { if (c) setCfg(c); return (ts ?? []).map((t: any) => ({ ...t, state: "idle" as const })); };
+
+  const loadMission = useCallback(async (force = false) => {
+    const ck = `${key}-mission`;
+    if (!force) { const c = store.get<any>(ck, null); if (c && c.date === todayKey() && Date.now() - c.at < 3 * 3600_000) { setMission(c.mission); setMissionText(c.text); setStaged(c.staged ?? []); if (c.cfg) setCfg(c.cfg); return; } }
     setMissionLoading(true);
-    try { const r = await fetch("/api/ai/rydra-coach", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ barber, stats, type: "daily_mission" }) }); const d = await r.json(); setMission(d.response || ""); }
-    catch {} finally { setMissionLoading(false); }
+    try { const j = await api({ type: "mission" }); const st = stage(j.texts, j.config); setMission(j.mission); setMissionText(j.response || ""); setStaged(st); store.set(ck, { date: todayKey(), at: Date.now(), mission: j.mission, text: j.response || "", staged: st, cfg: j.config }); }
+    catch (e: any) { setErr(e?.message || "Coach unavailable"); } setMissionLoading(false);
+  }, [api, key]);
+  useEffect(() => { if (info) loadMission(); }, [info, loadMission]);
+
+  // deep links: ?q=...  ?scenario=...  ?client=<user_id>
+  useEffect(() => {
+    if (!info) return; const q = sp.get("q"); const sc = sp.get("scenario"); const cl = sp.get("client");
+    if (q) { setTab("ask"); setChatInput(q); }
+    else if (cl) { const c = book.find((x) => x.user_id === cl); setTab("arena"); setRealId(cl); setRealName(c?.name ?? "client"); setSid(`real:${cl}`); }
+    else if (sc && SCENARIOS.some((s) => s.id === sc)) { setTab("arena"); setSid(sc); }
+  }, [info]); // eslint-disable-line
+
+  // ── Arena ────────────────────────────────────────────────────────────────
+  async function startRp(id = sid) {
+    setSid(id); setRp([]); setCard(null); setClosed(false); setTip(null); setMood(null); setRpLoading(true);
+    try { const j = await api({ type: "roleplay", scenario: id, difficulty: diff, messages: [] }); setClientName(j.client); setMood({ v: j.mood, start: j.start }); setRp([{ role: "assistant", content: j.reply }]); }
+    catch (e: any) { setErr(e?.message || "Could not start"); } setRpLoading(false);
   }
- 
-  async function startRoleplay(scenId: string) {
-    setScenario(scenId); setRoleplayMsgs([]); setExchangeCount(0); setFeedback("");
-    const sc = SCENARIOS.find(s => s.id === scenId);
-    if (!sc) return;
-    setRoleplayMsgs([{ role: "assistant", content: sc.opener, type: "client" }]);
+  async function sayRp() {
+    const t = rpInput.trim(); if (!t || rpLoading || closed) return; const next: Msg[] = [...rp, { role: "user", content: t }]; setRp(next); setRpInput(""); setRpLoading(true); setTip(null);
+    try { const j = await api({ type: "roleplay", scenario: sid, difficulty: diff, messages: next.map(({ role, content }) => ({ role, content })) }); setRp([...next, { role: "assistant", content: j.reply }]); setMood({ v: j.mood, start: mood?.start ?? j.start }); setTip(j.tip); if (j.closed) setClosed(true); }
+    catch (e: any) { setErr(e?.message || "Lost the client for a sec"); } setRpLoading(false);
   }
- 
-  async function sendRoleplay() {
-    if (!roleplayInput.trim() || roleplayLoading || !barber) return;
-    const msg = roleplayInput.trim(); setRoleplayInput(""); const newCount = exchangeCount + 1;
-    setRoleplayMsgs(p => [...p, { role: "user", content: msg }]); setExchangeCount(newCount); setRoleplayLoading(true);
-    try {
-      const r = await fetch("/api/ai/rydra-coach", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ barber, stats, type: "roleplay", scenario, messages: [...roleplayMsgs, { role: "user", content: msg }].map(m => ({ role: m.role, content: m.content })), exchange_count: newCount }) });
-      const d = await r.json();
-      if (d.feedback) { setFeedback(d.feedback); setRoleplayMsgs(p => [...p, { role: "assistant", content: d.response, type: "feedback" }]); }
-      else setRoleplayMsgs(p => [...p, { role: "assistant", content: d.response, type: "client" }]);
-    } catch {} finally { setRoleplayLoading(false); }
+  async function score() {
+    setScoring(true);
+    try { const j = await api({ type: "score", scenario: sid, difficulty: diff, messages: rp.map(({ role, content }) => ({ role, content })) }); setCard(j);
+      const label = sid.startsWith("real:") ? `Real: ${realName}` : SCENARIOS.find((s) => s.id === sid)?.label ?? sid; const nr = [{ at: new Date().toISOString(), scenario: sid.startsWith("real:") ? "real" : sid, label, difficulty: diff, score: j.score }, ...runs].slice(0, 60); setRuns(nr); store.set(`${key}-runs`, nr); }
+    catch (e: any) { setErr(e?.message || "Couldn't score that"); } setScoring(false);
   }
- 
-  async function sendChat() {
-    if (!chatInput.trim() || chatLoading || !barber) return;
-    const msg = chatInput.trim(); setChatInput(""); setChatMsgs(p => [...p, { role: "user", content: msg }]); setChatLoading(true);
-    try { const r = await fetch("/api/ai/rydra-coach", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ barber, stats, type: "coach_chat", messages: [...chatMsgs, { role: "user", content: msg }].map(m => ({ role: m.role, content: m.content })), query: msg }) }); const d = await r.json(); setChatMsgs(p => [...p, { role: "assistant", content: d.response }]); }
-    catch { setChatMsgs(p => [...p, { role: "assistant", content: "Something went wrong." }]); } finally { setChatLoading(false); }
+  const userTurns = rp.filter((m) => m.role === "user").length;
+  const best = (id: string) => { const r = runs.filter((x) => x.scenario === id); return r.length ? Math.max(...r.map((x) => x.score)) : null; };
+
+  // ── Ask ──────────────────────────────────────────────────────────────────
+  async function sendChat(q = chatInput) {
+    const t = q.trim(); if (!t || chatLoading) return; const hist = chat.map(({ role, content }) => ({ role, content })); setChat((c) => [...c, { role: "user", content: t }]); setChatInput(""); setChatLoading(true);
+    try { const j = await api({ type: "chat", query: t, messages: hist }); setChat((c) => [...c, { role: "assistant", content: j.response || "Not sure how to answer that.", texts: stage(j.texts, j.config) }]); }
+    catch (e: any) { setChat((c) => [...c, { role: "assistant", content: e?.message || "Coach is unavailable right now." }]); } setChatLoading(false);
   }
- 
-  const firstName = barber?.name?.split(" ")[0] || slug?.split("-")[0] || "Barber";
-  const rebookRate = stats?.rebook_rate ? (stats.rebook_rate * 100).toFixed(1) : "—";
-  const upsellRate = stats?.upsell_rate ? (stats.upsell_rate * 100).toFixed(1) : "—";
-  const avgService = stats?.avg_service_value ? `$${stats.avg_service_value.toFixed(0)}` : "—";
- 
+
+  // ── Staged texts: human reviews, human sends ─────────────────────────────
+  const finalText = (m: string, name: string) => `${m.replace(/\{first_name\}/g, (name.split(" ")[0] || "there").replace(/[^A-Za-z'\-]/g, ""))}${cfg?.booking_link ? " " + cfg.booking_link : ""}`.trim();
+  async function sendStaged(t: Staged, set: (fn: (t: Staged) => Staged) => void) {
+    const text = finalText(t.message, t.name); set((x) => ({ ...x, state: "sending" }));
+    try { const r = await aiFetch("/api/sms/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customer_id: t.user_id, message: text, customer_name: t.name, venue_id: VENUE_ID }) }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || "Not sent"); set((x) => ({ ...x, state: "sent" })); }
+    catch (e: any) { set((x) => ({ ...x, state: "failed", note: e?.message })); }
+  }
+  const renderStaged = (k: string, t: Staged, set: (fn: (t: Staged) => Staged) => void) => {
+    const len = finalText(t.message, t.name).length; const over = cfg ? len > cfg.body_max : false;
+    return (
+      <div key={k} className="rounded-lg p-3 mt-2" style={{ background: "#0A0612", border: `1px solid ${BDR}` }}>
+        <div className="flex justify-between text-[11px] mb-1.5"><span className="font-semibold text-white">{t.name}</span><span style={{ color: MUTED }}>{t.reason}</span></div>
+        <textarea value={t.message} disabled={t.state === "sent"} onChange={(e) => set((x) => ({ ...x, message: e.target.value, state: "idle" }))} rows={2} className="w-full rounded p-2 text-xs outline-none resize-none" style={{ background: CARD2, border: `1px solid ${BDR}` }} />
+        <div className="flex items-center justify-between mt-1.5"><span className="text-[10px]" style={{ color: over ? RED : MUTED }}>{len}{cfg ? `/${cfg.body_max}` : ""} chars with link</span>
+          {t.state === "sent" ? <span className="text-xs font-semibold" style={{ color: GREEN }}>Sent</span> : <button disabled={t.state === "sending" || over} onClick={() => sendStaged(t, set)} className="text-xs font-bold px-3 py-1.5 rounded-md disabled:opacity-40" style={{ background: PUR_L }}>{t.state === "sending" ? "Sending..." : "Send text"}</button>}</div>
+        {t.state === "failed" && <div className="text-[11px] mt-1" style={{ color: "#FDA4AF" }}>{t.note}</div>}
+      </div>);
+  };
+
+  // Scripts with real dates
+  const d4 = useMemo(() => { const d = new Date(); d.setDate(d.getDate() + 28); return d.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", timeZone: "Australia/Sydney" }); }, []);
+  const SCRIPTS = [
+    { title: "The rebooking close", sc: "rebooking", hex: RED, text: `"Before you head off, let's lock in your next one. Four weeks from today is ${d4}. I've got 10am or 2pm. Which works better?"`, why: "A specific date plus two options turns 'should I?' into 'which one?'. Say it while they're still in the chair." },
+    { title: "Problem, then solution upsell", sc: "upsell", hex: "#FBBF24", text: `"Your beard's a bit dry. I'll add a quick treatment, two minutes, and it makes the cut last longer. Most guys do it."`, why: "Name the problem first, give one concrete benefit, use social proof, then pick up the product." },
+    { title: "Welcome-back", sc: "win_back", hex: "#FB923C", text: `"Good to see you, mate. It's been a little while. Everything good? Let's get you sorted, and I'll put your next one in before you leave."`, why: "Warm, no guilt, and the rebook happens before they walk out." },
+    { title: "The first-timer follow-through", sc: "first_timer", hex: "#38BDF8", text: `"Really glad you came in. To keep it looking this good, four weeks is the sweet spot. I've got ${d4}. Morning or afternoon?"`, why: "First-timers who rebook in the chair are far more likely to become regulars." },
+    { title: "Handling 'bit pricey'", sc: "price", hex: "#F472B6", text: `"Fair enough. Honestly it's the bit that makes the cut last another two weeks. If you'd rather start small, the quick version is half the price. Which suits?"`, why: "Don't discount. Reframe the value, then offer a smaller yes." },
+    { title: "Fixing a cut that's off", sc: "complaint", hex: "#94A3B8", text: `"Thanks for telling me. Let's fix it. I'll take it as far as I can today, and your next trim is on me to blend it in. When suits?"`, why: "Listen, own it, give a plan, and keep the relationship by booking the fix." },
+  ];
+
+  if (err && !info) return <div className="min-h-screen flex flex-col items-center justify-center gap-3 text-sm" style={{ background: "#0A0612" }}><div style={{ color: RED }}>{err}</div><a href="/merchant/barber" className="underline" style={{ color: PUR_LL }}>Back to the team</a></div>;
+  if (!info) return <div className="min-h-screen flex items-center justify-center text-sm" style={{ background: "#0A0612", color: MUTED }}>Warming up your coach...</div>;
+  const b = info.barber; const s = b.stats;
+  const hot = book.filter((c) => (c.status === "slipping" || c.status === "overdue" || c.status === "due" || c.status === "lapsed") && !c.booked).sort((x, y) => y.atStake - x.atStake).slice(0, 6);
+  const rebookToday = tally.cuts ? Math.round((tally.rebooked / tally.cuts) * 100) : null;
+  const moodColor = mood ? (mood.v >= 70 ? GREEN : mood.v >= 40 ? GOLD : RED) : MUTED;
+
   return (
-    <div className={`min-h-screen ${BG} text-white pb-16`}>
-      {/* Nav */}
-      <div className="border-b border-[#0F1829] backdrop-blur-xl sticky top-0 z-30" style={{ background: "rgba(10,6,18,0.97)" }}>
-        <div className="max-w-[1200px] mx-auto px-8 h-14 flex items-center gap-6">
-          <div className="flex items-center gap-3 flex-shrink-0">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg, #5B21B6 0%, #D4A017 100%)" }}><svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" /></svg></div>
-            <div><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Rydra</div><div className="text-sm font-semibold text-white leading-none">RydraCoach</div></div>
-          </div>
-          <nav className="flex items-center gap-1">
-            {[
-              { href: "/merchant/dashboard", label: "Dashboard" },
-              { href: "/merchant/outreach",  label: "Outreach"  },
-              { href: "/merchant/campaign",  label: "Campaign"  },
-              { href: "/merchant/clients",   label: "Clients"   },
-              { href: "/merchant/barber",    label: "Barbers"   },
-            ].map(t => <a key={t.href} href={t.href} className="px-3.5 py-1.5 rounded-md text-xs font-medium text-slate-400 hover:text-white hover:bg-white/[0.05] transition-all">{t.label}</a>)}
-          </nav>
-          <button onClick={() => router.push(`/merchant/barber/${slug}`)} className="ml-auto text-[10px] text-slate-600 hover:text-slate-300 flex items-center gap-1 flex-shrink-0 transition-colors">
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-            {firstName}'s dashboard
-          </button>
+    <div className="min-h-screen text-white pb-16" style={{ background: "#0A0612" }}>
+      <div className="sticky top-0 z-30 border-b" style={{ background: "rgba(10,6,18,0.97)", borderColor: "#0F1829", backdropFilter: "blur(12px)" }}>
+        <div className="max-w-[1300px] mx-auto px-8 h-14 flex items-center gap-6">
+          <div className="flex items-center gap-3"><div className="w-7 h-7 rounded-lg" style={{ background: `linear-gradient(135deg, ${PUR}, ${GOLD})` }} /><div><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Rydra</div><div className="text-sm font-semibold leading-none">RydraCoach</div></div></div>
+          <nav className="flex items-center gap-1">{NAV.map((t) => <a key={t.href} href={t.href} className={`px-3.5 py-1.5 rounded-md text-xs font-medium ${(t as any).active ? "bg-[#5B21B6] text-white" : "text-slate-400 hover:text-white hover:bg-white/5"}`}>{t.label}</a>)}</nav>
+          <a href={`/merchant/barber/${slug}`} className="ml-auto text-[11px] hover:text-white" style={{ color: MUTED }}>&larr; {first}'s dashboard</a>
         </div>
       </div>
- 
-      <div className="max-w-[1200px] mx-auto px-8 py-8">
-        {/* Profile + stats */}
-        {barber && (
-          <div className={`${CARD} border ${BDR} rounded-xl p-5 mb-6 flex items-center gap-5`}>
-            <div className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-base flex-shrink-0" style={{ background: `linear-gradient(135deg, ${barber.color_from || "#5B21B6"}, ${barber.color_to || "#7C3AED"})` }}>
-              {barber.name.split(" ").map((n: string) => n[0]).slice(0,2).join("").toUpperCase()}
-            </div>
-            <div className="flex-1">
-              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-0.5">Personal Sales Academy</div>
-              <h1 className="text-xl font-bold text-white tracking-tight">{barber.name} — RydraCoach</h1>
-            </div>
-            <div className="flex items-center gap-3">
-              {[
-                { l: "Rebook Rate", v: `${rebookRate}%`, target: "22%", good: stats?.rebook_rate >= 0.22, hex: stats?.rebook_rate >= 0.22 ? "#34D399" : "#F43F5E" },
-                { l: "Avg Service",  v: avgService,       target: "$70", good: stats?.avg_service_value >= 70, hex: stats?.avg_service_value >= 70 ? "#34D399" : "#FBBF24" },
-                { l: "Upsell Rate", v: `${upsellRate}%`, target: "5%",  good: stats?.upsell_rate >= 0.05, hex: stats?.upsell_rate >= 0.05 ? "#34D399" : "#FBBF24" },
-              ].map(({ l, v, target, hex }) => (
-                <div key={l} className="rounded-lg px-4 py-2.5 text-center border" style={{ background: "#0F0A1E", borderColor: `${hex}25` }}>
-                  <div className="text-[9px] text-slate-600 mb-0.5">{l}</div>
-                  <div className="text-base font-bold" style={{ color: hex }}>{v}</div>
-                  <div className="text-[8px] text-slate-700">target {target}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
- 
-        {/* Tab bar */}
-        <div className="flex gap-1 mb-6 border-b border-[#2A1852]">
-          {([
-            { k: "mission", label: "Today's Mission" },
-            { k: "arena",   label: "Practice Arena" },
-            { k: "vault",   label: "Script Vault" },
-            { k: "chat",    label: "Coach Chat" },
-            { k: "diary",   label: "Diary" },
-          ] as const).map(({ k, label }) => (
-            <button key={k} onClick={() => setTab(k)}
-              className={`px-5 py-2.5 text-xs font-semibold uppercase tracking-wider transition-all border-b-2 -mb-px ${tab === k ? "border-[#7C3AED] text-[#A78BFA]" : "border-transparent text-slate-600 hover:text-slate-300"}`}>
-              {label}
-            </button>
-          ))}
+
+      <div className="max-w-[1300px] mx-auto px-8 pt-8 space-y-6">
+        {/* Hero with level */}
+        <div className="rounded-xl p-5 border flex flex-wrap items-center gap-6" style={{ background: CARD, borderColor: BDR }}>
+          <div className="w-14 h-14 rounded-xl flex items-center justify-center text-lg font-bold" style={{ background: `linear-gradient(135deg, ${b.color_from}, ${b.color_to})` }}>{b.name.split(" ").map((n: string) => n[0]).slice(0, 2).join("")}</div>
+          <div className="flex-1 min-w-[220px]"><div className="text-xl font-bold">G'day {first}</div><div className="text-sm" style={{ color: MUTED }}>{s ? `Rebook rate ${(num(s.rebook_rate) * 100).toFixed(1)}% vs ${(num(info.shop?.rebook_rate) * 100).toFixed(1)}% shop average` : "Let's get to work"}</div></div>
+          <div className="min-w-[200px]"><div className="flex justify-between text-xs mb-1"><span className="font-semibold" style={{ color: GOLD }}>Level {lv.l} · {title(lv.l)}</span><span style={{ color: MUTED }}>{lv.into}/{lv.need} XP</span></div><div className="h-2 rounded-full" style={{ background: CARD2 }}><div className="h-full rounded-full transition-all" style={{ width: `${(lv.into / lv.need) * 100}%`, background: `linear-gradient(90deg, ${PUR_L}, ${GOLD})` }} /></div></div>
+          <div className="text-center"><div className="text-2xl font-bold" style={{ color: streak ? GOLD : MUTED }}>{streak}</div><div className="text-[10px] uppercase tracking-widest" style={{ color: MUTED }}>day streak</div></div>
         </div>
- 
-        {/* MISSION */}
-        {tab === "mission" && (
-          <div className="grid grid-cols-3 gap-5">
-            <div className="col-span-2">
-              <div className={`${CARD} border ${BDR} rounded-xl p-6`}>
-                <div className="flex items-center justify-between mb-5">
-                  <div><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-0.5">AI-Generated</div><h2 className="text-base font-semibold text-white">Today's Mission</h2></div>
-                  <button onClick={generateMission} disabled={missionLoading || !barber}
-                    className="flex items-center gap-2 px-4 py-2 rounded-md text-xs font-semibold text-white transition-all disabled:opacity-40"
-                    style={{ background: "#5B21B6" }}>
-                    {missionLoading ? <><div className="w-3.5 h-3.5 border border-white/30 border-t-white rounded-full animate-spin" />Generating...</> : "Generate Mission"}
-                  </button>
-                </div>
-                {mission ? (
-                  <div className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{mission}</div>
-                ) : (
-                  <div className="text-center py-12">
-                    <div className="text-3xl mb-3">🎯</div>
-                    <div className="text-sm font-medium text-white mb-1">Ready to set your mission</div>
-                    <div className="text-[11px] text-slate-600 max-w-xs mx-auto">Your AI coach generates a personalised daily target based on your actual rebook rate, upsell rate, and revenue data.</div>
-                    <button onClick={generateMission} disabled={missionLoading || !barber}
-                      className="mt-5 px-5 py-2.5 rounded-md text-sm font-semibold text-white disabled:opacity-40 transition-all"
-                      style={{ background: "#5B21B6" }}>
-                      Generate Today's Mission
-                    </button>
-                  </div>
-                )}
+
+        <div className="flex gap-1 border-b" style={{ borderColor: BDR }}>{([["today", "Today"], ["arena", "Practice arena"], ["ask", "Ask the coach"], ["vault", "Scripts"], ["diary", "Diary"]] as const).map(([k, l]) => <button key={k} onClick={() => { setTab(k); setErr(""); }} className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wider -mb-px border-b-2" style={{ borderColor: tab === k ? PUR_L : "transparent", color: tab === k ? PUR_LL : MUTED }}>{l}</button>)}</div>
+        {err && <div className="rounded-lg p-3 text-sm" style={{ background: "#2A0F1A", border: `1px solid ${RED}55`, color: "#FDA4AF" }}>{err} <button className="underline ml-2" onClick={() => setErr("")}>Dismiss</button></div>}
+
+        {/* TODAY */}
+        {tab === "today" && (
+          <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_1fr] gap-6">
+            <div className="space-y-6">
+              <div className="rounded-xl p-5 border" style={{ background: "linear-gradient(135deg, #1B1240, #130C24)", borderColor: `${PUR_L}66` }}>
+                <div className="flex justify-between"><div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: PUR_LL }}>Today's game plan</div><button onClick={() => loadMission(true)} disabled={missionLoading} className="text-[11px] underline disabled:opacity-40" style={{ color: MUTED }}>{missionLoading ? "Building..." : "Rebuild"}</button></div>
+                {mission ? <div className="mt-2"><div className="text-lg font-semibold leading-snug">{mission.headline}</div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4"><div className="rounded-lg p-3" style={{ background: "#0A0612AA", border: `1px solid ${BDR}` }}><div className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: GOLD }}>Target</div><div className="font-semibold text-sm">{mission.target}</div></div>
+                    <div className="rounded-lg p-3" style={{ background: "#0A0612AA", border: `1px solid ${BDR}` }}><div className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: GOLD }}>Why</div><div className="text-sm text-slate-300">{mission.why}</div></div></div>
+                  <div className="mt-3 text-sm text-slate-200 leading-relaxed"><span className="font-semibold">The play: </span>{mission.play}</div></div>
+                  : <div className="mt-3 text-sm" style={{ color: MUTED }}>{missionLoading ? "Looking at your clients and numbers..." : missionText ? <Md text={missionText} /> : "No plan yet."}</div>}
               </div>
-            </div>
-            <div className="space-y-4">
-              {stats && (
-                <div className={`${CARD} border ${BDR} rounded-xl p-5`}>
-                  <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-4">Your Opportunities</div>
-                  {[
-                    stats.rebook_rate < 0.15 && { label: "Rebooking Critical", detail: `${(stats.rebook_rate*100).toFixed(1)}% rate — industry target 22%`, extra: `+$${Math.round(stats.total_clients*0.07*stats.avg_appt_value*0.6)}/mo if you hit 22%`, hex: "#F43F5E" },
-                    stats.upsell_rate < 0.05 && { label: "Upsell Opportunity", detail: `${(stats.upsell_rate*100).toFixed(1)}% rate — industry best 8-10%`, extra: `+$${Math.round(stats.total_appts*0.05*25*0.6)}/mo if you add 5%`, hex: "#FBBF24" },
-                    stats.pct_returning_clients < 0.25 && { label: "Returning Clients Low", detail: `${(stats.pct_returning_clients*100).toFixed(1)}% — build loyalty`, extra: "Focus on second appointment conversion", hex: "#38BDF8" },
-                  ].filter(Boolean).map((opp: any, idx) => (
-                    <div key={idx} className="mb-3 rounded-lg p-3 border" style={{ background: "#0F0A1E", borderColor: `${opp.hex}20` }}>
-                      <div className="text-xs font-semibold mb-1" style={{ color: opp.hex }}>{opp.label}</div>
-                      <div className="text-[10px] text-slate-500 mb-1">{opp.detail}</div>
-                      <div className="text-[9px] text-emerald-400">{opp.extra}</div>
-                    </div>
-                  ))}
+
+              {staged.length > 0 && (
+                <div className="rounded-xl p-5 border" style={{ background: CARD, borderColor: BDR }}>
+                  <div className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: MUTED }}>Texts your coach suggests</div><div className="text-[11px] text-slate-500 mb-1">Edit if you like. Nothing sends until you press Send.</div>
+                  {staged.map((t, i) => renderStaged(t.user_id + i, t, (fn) => setStaged((a) => a.map((x, j) => (j === i ? fn(x) : x)))))}
                 </div>
               )}
-              <div className={`${CARD} border ${BDR} rounded-xl p-5`}>
-                <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-3">Today's Quick Target</div>
-                <div className="space-y-2">
-                  {[{ l: "Rebook clients", v: 6 }, { l: "Upsells", v: 3 }].map(({ l, v }) => (
-                    <div key={l} className="flex items-center justify-between py-2 border-b border-[#0F1529]">
-                      <span className="text-xs text-slate-400">{l}</span>
-                      <span className="text-sm font-bold text-white">{v}</span>
-                    </div>
-                  ))}
+
+              {book.length === 0 && (
+                <div className="rounded-xl p-5 border" style={{ background: CARD, borderColor: BDR }}>
+                  <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: MUTED }}>Your clients to look out for</div>
+                  <div className="text-sm text-slate-300">Your coach can't see which clients are yours yet, so it can't name who to text or rehearse with.</div>
+                  <div className="text-[12px] mt-1" style={{ color: MUTED }}>Once the Fresha appointment history is imported (manager console, Client history), this fills with your regulars who are due or slipping, with one-tap texts.</div>
                 </div>
+              )}
+              {hot.length > 0 && (
+                <div className="rounded-xl p-5 border" style={{ background: CARD, borderColor: BDR }}>
+                  <div className="text-[10px] font-bold uppercase tracking-widest mb-3" style={{ color: MUTED }}>Your clients to look out for</div>
+                  <div className="space-y-2">{hot.map((c) => <div key={c.user_id} className="flex items-center gap-3 rounded-lg p-3" style={{ background: CARD2 }}>
+                    <div className="flex-1 min-w-0"><div className="text-sm font-medium"><a href={`/merchant/clients/${c.user_id}`} className="hover:underline">{c.name}</a></div><div className="text-[11px]" style={{ color: MUTED }}>{c.status === "due" ? "due now" : c.status} · {c.daysSince} days since last visit · {c.visitsWithMe} visits with you</div></div>
+                    <button onClick={() => { setTab("arena"); setRealId(c.user_id); setRealName(c.name); setSid(`real:${c.user_id}`); setRp([]); setCard(null); }} className="text-[11px] font-semibold px-3 py-1.5 rounded-md" style={{ background: `${PUR_L}33`, color: PUR_LL }}>Rehearse</button>
+                    <button onClick={() => { setTab("ask"); sendChat(`What should I say to ${c.name}? Look them up and stage a text if it makes sense.`); }} className="text-[11px] font-semibold px-3 py-1.5 rounded-md" style={{ background: `${GOLD}22`, color: GOLD }}>Ask coach</button></div>)}</div>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-6">
+              <div className="rounded-xl p-5 border" style={{ background: CARD, borderColor: BDR }}>
+                <div className="text-[10px] font-bold uppercase tracking-widest mb-3" style={{ color: MUTED }}>Today's scoreboard</div>
+                {[["cuts", "Clients today", PUR_LL], ["rebooked", "Rebooked in the chair", GREEN], ["upsold", "Add-ons sold", GOLD]].map(([k, l, c]) => <div key={k} className="flex items-center gap-3 py-2 border-b" style={{ borderColor: "#1d1238" }}>
+                  <div className="flex-1 text-sm">{l}</div><button onClick={() => setTally((t) => ({ ...t, [k]: Math.max(0, (t as any)[k] - 1) }))} className="w-7 h-7 rounded-md text-lg leading-none" style={{ background: CARD2 }}>-</button><div className="w-8 text-center text-xl font-bold" style={{ color: c as string }}>{(tally as any)[k]}</div><button onClick={() => setTally((t) => ({ ...t, [k]: (t as any)[k] + 1, ...(k !== "cuts" && (t as any)[k] >= t.cuts ? { cuts: t.cuts + 1 } : {}) }))} className="w-7 h-7 rounded-md text-lg leading-none" style={{ background: PUR_L }}>+</button></div>)}
+                <div className="mt-3 text-center"><div className="text-3xl font-bold" style={{ color: rebookToday === null ? MUTED : rebookToday >= 40 ? GREEN : GOLD }}>{rebookToday === null ? "–" : `${rebookToday}%`}</div><div className="text-[11px]" style={{ color: MUTED }}>rebooked in the chair today{s ? ` (your long-run rate: ${(num(s.rebook_rate) * 100).toFixed(1)}%)` : ""}</div></div>
+              </div>
+              <div className="rounded-xl p-5 border" style={{ background: CARD, borderColor: BDR }}>
+                <div className="text-[10px] font-bold uppercase tracking-widest mb-3" style={{ color: MUTED }}>Practice log</div>
+                {runs.length === 0 ? <div className="text-sm" style={{ color: MUTED }}>No practice yet. Ten minutes in the arena is the fastest way to level up.</div> : <div className="space-y-1.5">{runs.slice(0, 5).map((r, i) => <div key={i} className="flex justify-between text-xs"><span className="text-slate-300">{r.label} <span style={{ color: MUTED }}>({r.difficulty})</span></span><span className="font-bold" style={{ color: r.score >= 75 ? GREEN : r.score >= 50 ? GOLD : RED }}>{r.score}</span></div>)}</div>}
+                <button onClick={() => setTab("arena")} className="w-full mt-3 py-2 rounded-lg text-xs font-semibold border" style={{ borderColor: PUR_L, color: PUR_LL }}>Go to the arena</button>
               </div>
             </div>
           </div>
         )}
- 
+
         {/* ARENA */}
         {tab === "arena" && (
-          <div className="grid grid-cols-3 gap-5">
-            <div className={`${CARD} border ${BDR} rounded-xl p-5`}>
-              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-4">Choose Scenario</div>
-              <div className="space-y-2">
-                {SCENARIOS.map(sc => (
-                  <button key={sc.id} onClick={() => startRoleplay(sc.id)}
-                    className={`w-full text-left rounded-lg p-3.5 border transition-all ${scenario === sc.id ? "border-[#7C3AED]/40" : "border-[#2A1852] hover:border-[#3A2268]"}`}
-                    style={{ background: scenario === sc.id ? `${sc.hex}08` : "#0F0A1E", borderColor: scenario === sc.id ? `${sc.hex}30` : undefined }}>
-                    <div className="text-[9px] font-bold uppercase tracking-wider mb-0.5" style={{ color: sc.hex }}>{sc.label}</div>
-                    <div className="text-xs text-slate-500">{sc.desc}</div>
-                  </button>
-                ))}
-              </div>
+          <div className="grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-6">
+            <div className="space-y-3">
+              <div className="flex gap-1 p-1 rounded-lg" style={{ background: CARD2 }}>{(["easy", "normal", "hard"] as const).map((d) => <button key={d} onClick={() => setDiff(d)} className="flex-1 py-1.5 rounded-md text-xs font-semibold capitalize" style={{ background: diff === d ? PUR_L : "transparent", color: diff === d ? "#fff" : MUTED }}>{d}</button>)}</div>
+              {SCENARIOS.map((sc) => <button key={sc.id} onClick={() => startRp(sc.id)} className="w-full text-left rounded-lg p-3 border" style={{ background: sid === sc.id ? `${sc.hex}12` : CARD, borderColor: sid === sc.id ? sc.hex : BDR }}>
+                <div className="flex justify-between"><span className="text-sm font-semibold" style={{ color: sc.hex }}>{sc.label}</span>{best(sc.id) !== null && <span className="text-[11px]" style={{ color: MUTED }}>best {best(sc.id)}</span>}</div><div className="text-[11px] mt-0.5" style={{ color: MUTED }}>{sc.desc}</div></button>)}
+              <div className="rounded-lg p-3 border" style={{ background: CARD, borderColor: sid.startsWith("real:") ? GOLD : BDR }}>
+                <div className="text-sm font-semibold" style={{ color: GOLD }}>Rehearse a real client</div><div className="text-[11px] mb-2" style={{ color: MUTED }}>The AI plays one of your actual clients, using their history.</div>
+                {book.length === 0 && <div className="text-[11px] mb-2" style={{ color: GOLD }}>Available once client history is imported.</div>}
+                <select disabled={book.length === 0} value={realId} onChange={(e) => { const c = book.find((x) => x.user_id === e.target.value); setRealId(e.target.value); setRealName(c?.name ?? ""); }} className="w-full rounded-md p-2 text-xs outline-none" style={{ background: "#0A0612", border: `1px solid ${BDR}` }}>
+                  <option value="">Choose a client...</option>{book.filter((c) => !c.booked).slice(0, 40).map((c) => <option key={c.user_id} value={c.user_id}>{c.name} ({c.status})</option>)}</select>
+                <button disabled={!realId} onClick={() => startRp(`real:${realId}`)} className="w-full mt-2 py-2 rounded-md text-xs font-bold disabled:opacity-30" style={{ background: GOLD, color: "#000" }}>Start</button></div>
             </div>
-            <div className="col-span-2 flex flex-col">
-              <div className={`${CARD} border ${BDR} rounded-xl flex-1 flex flex-col overflow-hidden`} style={{ minHeight: "500px" }}>
-                <div className="px-5 py-4 border-b border-[#0F1829] flex items-center justify-between">
-                  <div>
-                    <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-0.5">Practice Arena</div>
-                    <div className="text-sm font-semibold text-white">{SCENARIOS.find(s=>s.id===scenario)?.label} Scenario</div>
+
+            <div className="rounded-xl border flex flex-col min-h-[560px]" style={{ background: CARD, borderColor: BDR }}>
+              {rp.length === 0 && !rpLoading ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-center p-10"><div className="text-3xl mb-3">🎯</div><div className="font-semibold mb-1">Pick a scenario to start</div><div className="text-sm max-w-sm" style={{ color: MUTED }}>The client speaks first. Reply like you would in the shop. Watch the mood meter: good technique moves it, weak technique drops it.</div></div>
+              ) : (
+                <>
+                  <div className="px-5 py-3 border-b" style={{ borderColor: BDR }}>
+                    <div className="flex justify-between text-xs mb-1.5"><span className="font-semibold">{clientName}'s mood</span><span style={{ color: moodColor }}>{mood ? (mood.v >= 80 ? "Sold" : mood.v >= 60 ? "Warming up" : mood.v >= 40 ? "On the fence" : mood.v >= 20 ? "Cooling off" : "Not buying it") : ""} {mood ? `· ${mood.v}` : ""}</span></div>
+                    <div className="h-2.5 rounded-full relative" style={{ background: CARD2 }}><div className="h-full rounded-full transition-all duration-700" style={{ width: `${mood?.v ?? 0}%`, background: moodColor }} />{mood && <div className="absolute top-[-2px] w-0.5 h-3.5 bg-white/40" style={{ left: `${mood.start}%` }} title="where they started" />}</div></div>
+                  <div className="flex-1 overflow-y-auto p-5 space-y-3 max-h-[420px]">
+                    {rp.map((m, i) => <div key={i} className={`flex ${m.role === "user" ? "justify-end" : ""}`}><div className="max-w-[80%] rounded-2xl px-4 py-2.5 text-sm" style={m.role === "user" ? { background: PUR_L } : { background: CARD2 }}>{m.role === "assistant" && <div className="text-[10px] font-bold mb-0.5" style={{ color: GOLD }}>{clientName}</div>}{m.content}</div></div>)}
+                    {rpLoading && <div className="text-xs" style={{ color: MUTED }}>{clientName} is thinking...</div>}
+                    {tip && <div className="text-xs rounded-lg p-2.5" style={{ background: "#2A2108", color: GOLD }}>Hint: {tip}</div>}
+                    {closed && !card && <div className="text-sm rounded-lg p-3 text-center" style={{ background: "#0F2A1E", color: GREEN }}>{clientName} said yes. Nice. Score it to bank the XP.</div>}
+                    <div ref={rpEnd} />
                   </div>
-                  <button onClick={() => startRoleplay(scenario)} className="px-3 py-1.5 rounded-md text-[10px] font-semibold border border-[#3A2268] text-slate-400 hover:text-white transition-all" style={{ background: "#0F0A1E" }}>Reset</button>
-                </div>
-                <div className="flex-1 overflow-y-auto p-5 space-y-3">
-                  {roleplayMsgs.length === 0 ? (
-                    <div className="flex items-center justify-center h-full text-center">
-                      <div><div className="text-2xl mb-3">⚡</div><div className="text-sm font-medium text-white mb-1">Select a scenario</div><div className="text-[11px] text-slate-600">AI plays the client. You play yourself.</div></div>
+                  {card ? (
+                    <div className="p-5 border-t space-y-3" style={{ borderColor: BDR }}>
+                      <div className="flex items-center gap-4"><div className="text-5xl font-bold" style={{ color: card.score >= 75 ? GREEN : card.score >= 50 ? GOLD : RED }}>{card.score}</div><div><div className="font-semibold">{card.verdict}</div><div className="text-[11px]" style={{ color: MUTED }}>+{Math.round(card.score / 2)} XP</div></div></div>
+                      <div className="space-y-1.5">{card.criteria.map((c: any) => <div key={c.name} className="flex gap-2 text-sm"><span style={{ color: c.met ? GREEN : RED }}>{c.met ? "✓" : "✗"}</span><div><span className="text-slate-200">{c.name}</span>{c.note && <div className="text-[11px]" style={{ color: MUTED }}>{c.note}</div>}</div></div>)}</div>
+                      {card.best_line && <div className="text-xs rounded-lg p-3" style={{ background: "#0F2A1E", color: GREEN }}>Best line: {card.best_line}</div>}
+                      {card.upgrade && <div className="text-xs rounded-lg p-3" style={{ background: CARD2 }}><span style={{ color: GOLD }}>Try this instead: </span>{card.upgrade}</div>}
+                      <div className="flex gap-2"><button onClick={() => startRp(sid)} className="flex-1 py-2.5 rounded-lg text-sm font-bold" style={{ background: PUR_L }}>Go again</button><button onClick={() => { setDiff(diff === "easy" ? "normal" : "hard"); startRp(sid); }} className="px-4 py-2.5 rounded-lg text-sm border" style={{ borderColor: GOLD, color: GOLD }}>Harder</button></div>
                     </div>
                   ) : (
-                    roleplayMsgs.map((msg, i) => (
-                      <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                        {msg.role === "assistant" && (
-                          <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 mr-2 mt-0.5 text-xs font-bold" style={{ background: msg.type === "feedback" ? "#5B21B6" : "#0F0A1E", border: "1px solid #3A2268", color: msg.type === "feedback" ? "#fff" : "#94A3B8" }}>
-                            {msg.type === "feedback" ? "✓" : "C"}
-                          </div>
-                        )}
-                        <div className={`max-w-[78%] rounded-xl px-4 py-3 text-sm leading-relaxed ${msg.role === "user" ? "bg-[#5B21B6] text-white rounded-tr-sm" : msg.type === "feedback" ? "border border-[#7C3AED]/30 text-slate-200 rounded-tl-sm" : "border border-[#2A1852] text-slate-300 rounded-tl-sm"}`}
-                          style={msg.role === "assistant" ? { background: msg.type === "feedback" ? "rgba(91,33,182,0.12)" : "#0F0A1E" } : {}}>
-                          {msg.type === "feedback" && <div className="text-[9px] font-bold uppercase tracking-widest text-[#A78BFA] mb-2">Coach Feedback</div>}
-                          {msg.content}
-                        </div>
-                        {msg.role === "user" && <div className="w-7 h-7 rounded-md border border-[#2A1852] flex items-center justify-center flex-shrink-0 ml-2 mt-0.5 text-xs font-bold text-slate-500" style={{ background: "#0F0A1E" }}>Y</div>}
-                      </div>
-                    ))
+                    <div className="p-4 border-t" style={{ borderColor: BDR }}>
+                      <div className="flex gap-2"><input value={rpInput} onChange={(e) => setRpInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sayRp()} disabled={rpLoading || closed} placeholder="What do you say?" className="flex-1 rounded-lg px-4 py-2.5 text-sm outline-none" style={{ background: "#0A0612", border: `1px solid ${BDR}` }} /><button onClick={sayRp} disabled={rpLoading || closed || !rpInput.trim()} className="px-5 rounded-lg text-sm font-semibold disabled:opacity-40" style={{ background: PUR_L }}>Say it</button></div>
+                      <div className="flex justify-between mt-2"><span className="text-[11px]" style={{ color: MUTED }}>{userTurns} turn{userTurns === 1 ? "" : "s"}</span><button onClick={score} disabled={scoring || userTurns < 1} className="text-xs font-bold px-4 py-1.5 rounded-md disabled:opacity-30" style={{ background: GOLD, color: "#000" }}>{scoring ? "Scoring..." : "Finish and score"}</button></div>
+                    </div>
                   )}
-                  {roleplayLoading && <div className="flex gap-1.5 px-4 py-2"><div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" /><div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} /><div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} /></div>}
-                  <div ref={roleEndRef} />
-                </div>
-                <div className="border-t border-[#0F1829] p-4">
-                  <div className="flex gap-2">
-                    <input value={roleplayInput} onChange={e => setRoleplayInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendRoleplay(); }}} disabled={roleplayLoading || roleplayMsgs.length === 0} placeholder="Respond as yourself..."
-                      className="flex-1 rounded-md px-4 py-2.5 text-sm text-white placeholder-slate-600 border border-[#2A1852] focus:border-[#7C3AED]/40 focus:outline-none transition-all" style={{ background: "#0F0A1E" }} />
-                    <button onClick={sendRoleplay} disabled={roleplayLoading || !roleplayInput.trim() || roleplayMsgs.length === 0} className="rounded-md px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40 transition-all" style={{ background: "#5B21B6" }}>Reply</button>
-                  </div>
-                  {exchangeCount > 0 && <div className="text-[9px] text-slate-700 mt-2 text-center uppercase tracking-wider">Exchange {exchangeCount} — coach feedback after 3-4 exchanges</div>}
-                </div>
-              </div>
+                </>
+              )}
             </div>
           </div>
         )}
- 
+
+        {/* ASK */}
+        {tab === "ask" && (
+          <div className="rounded-xl border flex flex-col min-h-[540px]" style={{ background: CARD, borderColor: BDR }}>
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 max-h-[520px]">
+              {chat.length === 0 && (
+                <div className="text-center py-8"><div className="font-semibold mb-1">Ask anything about your numbers, your clients or your technique</div><div className="text-sm mb-4" style={{ color: MUTED }}>The coach can look up your real data and draft texts for you to review.</div>
+                  <div className="flex flex-wrap justify-center gap-2">{["Who should I text today?", "Why is my rebook rate below the shop's?", "Which of my regulars am I about to lose?", "Plan my week to earn more", "How do I sell more beard treatments?"].map((q) => <button key={q} onClick={() => sendChat(q)} className="text-xs px-3 py-1.5 rounded-full border hover:text-white" style={{ borderColor: BDR, color: "#94A3B8", background: CARD2 }}>{q}</button>)}</div></div>)}
+              {chat.map((m, i) => <div key={i} className={`flex ${m.role === "user" ? "justify-end" : ""}`}><div className={`max-w-[85%] rounded-2xl px-4 py-3 ${m.role === "user" ? "text-sm" : ""}`} style={m.role === "user" ? { background: PUR_L } : { background: CARD2 }}>
+                {m.role === "assistant" ? <><div className="text-[10px] font-bold mb-1" style={{ color: GOLD }}>RydraCoach</div><Md text={m.content} />{m.texts?.map((t, j) => renderStaged(t.user_id + j, t, (fn) => setChat((c) => c.map((x, k) => (k === i ? { ...x, texts: x.texts!.map((y, l) => (l === j ? fn(y) : y)) } : x)))))}</> : m.content}</div></div>)}
+              {chatLoading && <div className="text-xs" style={{ color: MUTED }}>Checking your numbers...</div>}<div ref={endRef} />
+            </div>
+            <div className="p-4 border-t flex gap-2" style={{ borderColor: BDR }}><input value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sendChat()} placeholder="Ask your coach..." className="flex-1 rounded-lg px-4 py-2.5 text-sm outline-none" style={{ background: "#0A0612", border: `1px solid ${BDR}` }} /><button onClick={() => sendChat()} disabled={chatLoading || !chatInput.trim()} className="px-5 rounded-lg text-sm font-semibold disabled:opacity-40" style={{ background: PUR_L }}>Ask</button></div>
+          </div>
+        )}
+
         {/* VAULT */}
         {tab === "vault" && (
-          <div className="space-y-3">
-            <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-4">5 proven scripts · click to expand with psychology</div>
-            {SCRIPTS.map(s => (
-              <div key={s.title} className={`${CARD} border rounded-xl overflow-hidden transition-all hover:border-[#3A2268]`} style={{ borderColor: expandedScript === s.title ? `${s.hex}30` : "#2A1852" }}>
-                <button className="w-full flex items-center gap-4 p-5 text-left" onClick={() => setExpandedScript(expandedScript === s.title ? null : s.title)}>
-                  <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: s.hex }} />
-                  <div className="flex-1">
-                    <div className="text-[9px] font-bold uppercase tracking-widest mb-0.5" style={{ color: s.hex }}>{s.category}</div>
-                    <div className="text-sm font-semibold text-white">{s.title}</div>
-                  </div>
-                  <svg className={`w-4 h-4 text-slate-600 transition-transform ${expandedScript === s.title ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                </button>
-                {expandedScript === s.title && (
-                  <div className="px-5 pb-5 grid grid-cols-2 gap-4">
-                    <div className="rounded-lg p-4 border" style={{ background: "#0F0A1E", borderColor: `${s.hex}20` }}>
-                      <div className="text-[9px] font-bold uppercase tracking-widest mb-2" style={{ color: s.hex }}>The Script</div>
-                      <p className="text-sm text-slate-200 italic leading-relaxed">{s.script}</p>
-                    </div>
-                    <div className="rounded-lg p-4 border border-[#2A1852]" style={{ background: "#0F0A1E" }}>
-                      <div className="text-[9px] font-bold uppercase tracking-widest text-[#A78BFA] mb-2">Psychology</div>
-                      <p className="text-xs text-slate-400 leading-relaxed mb-3">{s.psychology}</p>
-                      <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-1">When to use</div>
-                      <p className="text-[10px] text-slate-500">{s.target}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{SCRIPTS.map((sc) => <div key={sc.title} className="rounded-xl p-5 border" style={{ background: CARD, borderColor: BDR }}>
+            <div className="font-semibold mb-2" style={{ color: sc.hex }}>{sc.title}</div><div className="text-sm rounded-lg p-3 leading-relaxed" style={{ background: CARD2 }}>{sc.text}</div><div className="text-[11px] mt-2" style={{ color: MUTED }}>{sc.why}</div>
+            <div className="flex gap-2 mt-3"><button onClick={() => navigator.clipboard?.writeText(sc.text.replace(/^"|"$/g, ""))} className="text-xs px-3 py-1.5 rounded-md border" style={{ borderColor: BDR, color: "#94A3B8" }}>Copy</button><button onClick={() => { setTab("arena"); startRp(sc.sc); }} className="text-xs font-semibold px-3 py-1.5 rounded-md" style={{ background: `${PUR_L}33`, color: PUR_LL }}>Practise this</button></div></div>)}</div>
         )}
- 
-        {/* CHAT */}
-        {tab === "chat" && (
-          <div className={`${CARD} border ${BDR} rounded-xl overflow-hidden flex flex-col`} style={{ height: "560px" }}>
-            <div className="px-5 py-4 border-b border-[#0F1829] flex items-center gap-3 flex-shrink-0">
-              <div className="w-7 h-7 rounded-md bg-[#5B21B6] flex items-center justify-center"><svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" /></svg></div>
-              <div><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">{firstName}'s personal coach</div><div className="text-sm font-semibold text-white">Ask anything about sales, scripts, or strategy</div></div>
-            </div>
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
-              {chatMsgs.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
-                  <div className="w-10 h-10 rounded-xl bg-[#5B21B6]/10 border border-[#7C3AED]/20 flex items-center justify-center"><svg className="w-5 h-5 text-indigo-500" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" /></svg></div>
-                  <div><div className="text-sm font-medium text-white">{firstName}'s personal coach</div><div className="text-[11px] text-slate-600 mt-0.5">Ask about your numbers, scripts, client types, or anything sales</div></div>
-                  <div className="flex flex-wrap gap-1.5 justify-center max-w-sm">
-                    {["Give me the rebooking script","What's my biggest opportunity today?","How do I upsell without being pushy?","Set me a revenue target for this week"].map(p => (
-                      <button key={p} onClick={() => setChatInput(p)} className="text-[10px] border border-[#2A1852] text-slate-500 hover:text-slate-200 hover:border-[#3A2268] px-2.5 py-1.5 rounded-md transition-all">{p}</button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                chatMsgs.map((msg, i) => (
-                  <div key={i} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                    {msg.role === "assistant" && <div className="w-6 h-6 rounded-md bg-[#5B21B6] flex items-center justify-center flex-shrink-0 mt-0.5"><svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" /></svg></div>}
-                    <div className={`max-w-[78%] rounded-xl px-4 py-3 text-sm leading-relaxed ${msg.role === "user" ? "bg-[#5B21B6] text-white rounded-tr-sm" : "border border-[#2A1852] text-slate-300 rounded-tl-sm"}`} style={msg.role === "assistant" ? { background: "#0F0A1E" } : {}}>{msg.content}</div>
-                  </div>
-                ))
-              )}
-              {chatLoading && <div className="flex gap-3"><div className="w-6 h-6 rounded-md bg-[#5B21B6] flex items-center justify-center flex-shrink-0"><div className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" /></div><div className="px-4 py-3 rounded-xl rounded-tl-sm border border-[#2A1852] flex gap-1 items-center" style={{ background: "#0F0A1E" }}>{[0,150,300].map(d => <div key={d} className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />)}</div></div>}
-              <div ref={chatEndRef} />
-            </div>
-            <div className="border-t border-[#0F1829] p-4 flex-shrink-0">
-              <form onSubmit={e => { e.preventDefault(); sendChat(); }} className="flex gap-2">
-                <input value={chatInput} onChange={e => setChatInput(e.target.value)} disabled={chatLoading} placeholder={`Ask ${firstName}'s coach anything...`}
-                  className="flex-1 rounded-md px-4 py-2.5 text-sm text-white placeholder-slate-600 border border-[#2A1852] focus:border-[#7C3AED]/40 focus:outline-none transition-all" style={{ background: "#0F0A1E" }} />
-                <button type="submit" disabled={chatLoading || !chatInput.trim()} className="rounded-md px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40 transition-all" style={{ background: "#5B21B6" }}>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
-        {/* DIARY TAB */}
-        {tab === "diary" && barber && (
-          <DiaryWidget
-            venueId={VENUE_ID}
-            barberSlug={slug}
-            barberName={barber.name}
-            mode="barber"
-          />
-        )}
- 
+
+        {tab === "diary" && <DiaryWidget venueId={VENUE_ID} barberSlug={slug} barberName={b.name} mode="barber" />}
       </div>
     </div>
   );
 }
+const num = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+
+export default function CoachPage() { return <Suspense fallback={null}><Coach /></Suspense>; }

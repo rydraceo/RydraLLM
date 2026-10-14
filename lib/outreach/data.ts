@@ -19,7 +19,7 @@ export function outreachConfig(): OutreachConfig {
 export type QueueRow = {
   user_id: string; name: string; risk_segment: string; markov_state: MarkovKey;
   days_since_last_visit: number; visits: number; clv_aud: number; intervention_value_aud: number;
-  last_texted_at: string | null; cooling_down: boolean;
+  last_texted_at: string | null; cooling_down: boolean; gap_ratio: number;
 };
 export type LogRow = { sent_at: string; name: string; phone_last4: string | null; status: string; markov_state: string | null; cost: number };
 export type OutreachOverview = {
@@ -76,7 +76,7 @@ export async function computeOutreach(supabase: SupabaseClient, venueId: string,
         user_id: c.user_id, name: c.name, risk_segment: c.risk_segment, markov_state: c.markov_state,
         days_since_last_visit: c.days_since_last_visit, visits: c.visits, clv_aud: c.clv_aud,
         intervention_value_aud: c.intervention_value_aud, last_texted_at: last,
-        cooling_down: !!last && coolMs > 0 && now - Date.parse(last) < coolMs,
+        cooling_down: !!last && coolMs > 0 && now - Date.parse(last) < coolMs, gap_ratio: c.gap_ratio,
       };
     })
     .sort((a, b) => b.intervention_value_aud - a.intervention_value_aud);
@@ -90,7 +90,7 @@ export async function computeOutreach(supabase: SupabaseClient, venueId: string,
       config,
       stats: { sent_24h: sent24, remaining_today: Math.max(0, config.daily_cap - sent24), sent_30d: sent30, failed_30d: failed30, cost_30d: Math.round(cost30 * 100) / 100 },
       daily: [...dayMap.entries()].map(([date, v]) => ({ date, sent: v.sent, failed: v.failed, cost: Math.round(v.cost * 100) / 100 })),
-      queue: all.slice(0, 150),
+      queue: all.slice(0, 500),
       candidates_total: candidates.length,
       cooling_total: all.length - candidates.length,
       blocked: { held: count("held"), opted_out: count("opted_out"), invalid_number: count("invalid_number") },

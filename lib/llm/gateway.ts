@@ -74,7 +74,9 @@ export async function chat(o: { messages: ChatMsg[]; tools?: ToolDef[]; maxToken
     max_tokens: o.maxTokens ?? 1200,
   };
   if (o.tools?.length) body.tools = o.tools;
-  if (o.temperature != null) body.temperature = o.temperature;
+  // Newer Claude models reject `temperature` outright ("temperature is deprecated for this model"), which made every
+  // call that set it fail. It is only sent when GATEWAY_SEND_TEMPERATURE=1 (e.g. for an older model).
+  if (o.temperature != null && process.env.GATEWAY_SEND_TEMPERATURE === "1") body.temperature = o.temperature;
 
   let res: any;
   try {

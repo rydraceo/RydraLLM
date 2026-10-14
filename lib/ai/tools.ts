@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { UiAction, CampaignDraft, SegFilter, SmsFilter, DashboardSection } from "@/lib/ai/types";
+import { loadTeam, barberFacts } from "@/lib/barbers/data";
 import { getCustomers, filterCustomers, sortCustomers, summarise, SMS_COST_AUD, type CustomerFilter, type SortKey } from "@/lib/ai/customers";
 
 export type ToolCtx = {
@@ -8,6 +9,9 @@ export type ToolCtx = {
   businessId: string;
   actions: UiAction[];
   drafts: CampaignDraft[];
+  /** RydraCoach: the barber this conversation is about, and texts the coach has staged for the barber to review. */
+  barberSlug?: string;
+  texts?: { user_id: string; name: string; message: string; reason: string }[];
 };
 
 // ─── Tool definitions (Anthropic tool-use schema) ────────────────────────────
@@ -27,6 +31,25 @@ const filterProps = {
 };
 
 export const TOOLS = [
+  {
+    name: "get_barber_profile",
+    description: "Facts about one barber: revenue, rebook rate, upsell rate, ticket size, how their clients behave, and how they compare with the team. Omit slug for the barber this conversation is about.",
+    input_schema: { type: "object", properties: { slug: { type: "string", description: "Barber slug, e.g. 'jb'. Optional." } } },
+  },
+  {
+    name: "get_barber_clients",
+    description: "A barber's own clients (the ones who see them most), most valuable-at-risk first. Use it to find who they should reach out to or look out for.",
+    input_schema: { type: "object", properties: {
+      slug: { type: "string" },
+      status: { type: "string", enum: ["all", "due", "slipping", "overdue", "lapsed", "new", "booked"], description: "due = about to be due, slipping = a little late, overdue = very late, lapsed = gone quiet, new = only one visit." },
+      limit: { type: "number", description: "1-15, default 8" },
+    } },
+  },
+  {
+    name: "suggest_text",
+    description: "Stage a short text message to one client for the barber to review. NOTHING is sent. Use the client's user_id from get_barber_clients. Message: max 80 characters, must include {first_name}, no links, prices or discounts.",
+    input_schema: { type: "object", properties: { user_id: { type: "string" }, message: { type: "string" }, reason: { type: "string", description: "One short line on why this client, why now." } }, required: ["user_id", "message"] },
+  },
   {
     name: "get_business_summary",
     description: "Headline numbers for the whole client base: totals, counts per segment and SMS eligibility, total lifetime value, total intervention value. Use for overviews and health checks.",
@@ -173,6 +196,41 @@ export async function runTool(name: string, input: Record<string, unknown>, ctx:
 
 async function exec(name: string, i: Record<string, unknown>, ctx: ToolCtx): Promise<unknown> {
   switch (name) {
+    case "get_barber_profile": {
+      const team = await loadTeam(ctx.supabase, ctx.venueId, ctx.businessId);
+      const slug = String(i.slug ?? ctx.barberSlug ?? "");
+      const b = team.barbers.find((x) => x.slug === slug);
+      if (!b) return { error: "No such barber.", available: team.barbers.map((x) => x.slug) };
+      return { facts: barberFacts(b, team) };
+    }
+
+    case "get_barber_clients": {
+      const team = await loadTeam(ctx.supabase, ctx.venueId, ctx.businessId);
+      const slug = String(i.slug ?? ctx.barberSlug ?? "");
+      const b = team.barbers.find((x) => x.slug === slug);
+      if (!b) return { error: "No such barber." };
+      if (!b.metrics) return { error: "Client history by barber isn't available yet." };
+      const st = String(i.status ?? "all");
+      const limit = Math.min(Math.max(Math.round(Number(i.limit) || 8), 1), 15);
+      const list = b.metrics.book.filter((c) => st === "all" || c.status === st);
+      return { total_matching: list.length, clients: list.slice(0, limit).map((c) => ({ user_id: c.user_id, name: c.name, status: c.status, visits_with_this_barber: c.visitsWithMe, total_visits: c.visits, lifetime_value_aud: Math.round(c.clv), days_since_last_visit: c.daysSince, usual_gap_days: c.avgGap, value_at_risk_aud: c.atStake, can_text: c.smsOk && !c.booked })) };
+    }
+
+    case "suggest_text": {
+      const id = String(i.user_id ?? "");
+      const rows = await getCustomers(ctx.supabase, ctx.venueId, ctx.businessId);
+      const c = rows.find((r) => r.user_id === id);
+      if (!c) return { error: "No such client. Use a user_id returned by get_barber_clients." };
+      if (c.sms_status !== "ok") return { error: `This client cannot be messaged (${c.sms_status}).` };
+      if (c.has_upcoming_booking) return { error: "This client is already booked in. No text needed." };
+      const message = ascii(String(i.message ?? ""));
+      const problem = messageProblem(message);
+      if (problem) return { error: problem };
+      if (!message.includes("{first_name}")) return { error: "message must include {first_name}" };
+      (ctx.texts ??= []).push({ user_id: id, name: c.name, message, reason: ascii(String(i.reason ?? "")).slice(0, 140) });
+      return { staged: true, note: "Shown to the barber to review. Nothing has been sent." };
+    }
+
     case "get_business_summary": {
       const rows = await getCustomers(ctx.supabase, ctx.venueId, ctx.businessId);
       return summarise(rows);

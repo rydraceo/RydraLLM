@@ -1,375 +1,259 @@
 "use client";
-import { useState, useEffect } from "react";
+// Client 360: everything about one client on a page, what to do about it, and a one-tap way to do it.
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import { Bar, BarChart, Cell, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { aiFetch } from "@/lib/ai/client";
 import { DiaryWidget } from "@/app/components/diary-widget";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, ReferenceLine } from "recharts";
- 
-const BG   = "bg-[#0A0612]";
-const SURF = "bg-[#090D1A]";
-const CARD = "bg-[#130C24]";
-const CARD2 = "bg-[#1A1030]";
-const BDR  = "border-[#2A1852]";
-const BDR2 = "border-[#3A2268]";
-const TIP  = { backgroundColor: "#130C24", border: "1px solid #3A2268", borderRadius: "4px", color: "#fff", fontSize: "11px" };
- 
+import { DUE_META, dueStatus, type ClientRow } from "@/lib/clients/insights";
+
+const GOLD = "#D4A017", PUR = "#5B21B6", PUR_L = "#7C3AED", PUR_LL = "#A78BFA", MUTED = "#6B5C8A", GREEN = "#34D399", RED = "#F43F5E";
+const CARD = "#130C24", CARD2 = "#1A1030", BDR = "#2A1852";
+const TIP = { backgroundColor: CARD, border: "1px solid #3A2268", borderRadius: 4, color: "#fff", fontSize: 11 };
 const NAV = [
-  { href: "/merchant/dashboard", label: "Dashboard" },
-  { href: "/merchant/outreach",  label: "Outreach"  },
-  { href: "/merchant/campaign",  label: "Campaign"  },
-  { href: "/merchant/clients",   label: "Clients", active: true },
-  { href: "/merchant/barber",    label: "Barbers"   },
+  { href: "/merchant/dashboard", label: "Dashboard" }, { href: "/merchant/outreach", label: "Outreach" }, { href: "/merchant/campaign", label: "Campaign" },
+  { href: "/merchant/clients", label: "Clients", active: true }, { href: "/merchant/barber", label: "Barbers" },
 ];
- 
-const STATE_META: Record<string, { label: string; strategy: string; discount: string; hex: string }> = {
-  C:          { label: "First Timer",  strategy: "Rebook nudge before habit breaks at day 45. Create the routine early — no discount needed.",  discount: "No discount",  hex: "#38BDF8" },
-  X:          { label: "Churned",      strategy: "Aggressive win-back. Loss aversion framing + $20–30 incentive. Act immediately.",             discount: "$20–30 off",   hex: "#F43F5E" },
-  R_at_risk:  { label: "At Risk",      strategy: "Loyal customer drifting. Personalise + create scarcity. Act within 7 days.",                  discount: "$10–20 off",   hex: "#FB923C" },
-  R_on_fence: { label: "On the Fence", strategy: "Gentle nudge only. No discount — they may rebook without incentive.",                         discount: "No discount",  hex: "#FBBF24" },
-  R_loyal:    { label: "Loyal",        strategy: "Appreciation message only. Discounting loyal clients destroys CLV.",                          discount: "No discount",  hex: "#34D399" },
-};
- 
-function ArcGauge({ value, max = 10, hex, label }: { value: number; max?: number; hex: string; label: string }) {
-  const pct = Math.min(value / max, 1);
-  const r = 42; const cx = 56; const cy = 56;
-  const start = -Math.PI * 0.75; const sweep = Math.PI * 1.5;
-  const toXY = (a: number) => ({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
-  const s = toXY(start); const e = toXY(start + sweep);
-  const sv = toXY(start + sweep * pct); const la = sweep * pct > Math.PI ? 1 : 0;
+const STATE_NAME: Record<string, string> = { X: "Lapsed", R_at_risk: "At risk", R_on_fence: "Due soon", C: "First-timer", R_loyal: "Loyal" };
+const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const $ = (n: number) => `$${Math.round(n).toLocaleString("en-AU")}`;
+const dshort = (d: string | null) => (d ? new Date(d.length <= 10 ? d + "T12:00:00Z" : d).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "2-digit", timeZone: d.length <= 10 ? "UTC" : "Australia/Sydney" }) : "–");
+
+function Box({ title, sub, children, className = "" }: { title?: string; sub?: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className="flex flex-col items-center gap-2">
-      <svg width={112} height={90} viewBox="0 0 112 90">
-        <path d={`M ${s.x} ${s.y} A ${r} ${r} 0 1 1 ${e.x} ${e.y}`} fill="none" stroke="#2A1852" strokeWidth="8" strokeLinecap="round" />
-        {pct > 0 && <path d={`M ${s.x} ${s.y} A ${r} ${r} 0 ${la} 1 ${sv.x} ${sv.y}`} fill="none" stroke={hex} strokeWidth="8" strokeLinecap="round" />}
-        <text x="56" y="58" textAnchor="middle" fill="white" fontSize="18" fontWeight="700">{value.toFixed(1)}</text>
-        <text x="56" y="70" textAnchor="middle" fill="#475569" fontSize="8">/{max}</text>
-      </svg>
-      <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: hex }}>{label}</span>
+    <div className={`rounded-xl p-5 border ${className}`} style={{ background: CARD, borderColor: BDR }}>
+      {title && <div className="mb-3"><div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: MUTED }}>{title}</div>{sub && <div className="text-[11px] text-slate-500 mt-0.5">{sub}</div>}</div>}
+      {children}
     </div>
   );
 }
- 
-function SmsDrawer({ customer: c, onClose, onSent }: { customer: any; onClose: () => void; onSent: (m: string) => void }) {
-  const [text, setText] = useState(""); const [gen, setGen] = useState(false); const [sending, setSending] = useState(false); const [sent, setSent] = useState(false);
-  const meta = STATE_META[c.markov_state] || STATE_META.R_at_risk;
-  const VENUE_ID = process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID || "e1a6c15d-8ccc-4f58-aefb-8bea46e39918";
-  async function generate() { setGen(true); try { const r = await fetch("/api/ai/sms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customer: c }) }); const d = await r.json(); setText(d.message || ""); } catch {} finally { setGen(false); } }
-  async function send() { if (!text.trim() || !c.phone) return; setSending(true); try { const r = await fetch("/api/sms/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: c.phone, message: text, customer_name: c.name, customer_id: c.user_id, venue_id: VENUE_ID, markov_state: c.markov_state, risk_segment: c.risk_segment, gap_ratio: c.gap_ratio, days_overdue: c.days_overdue }) }); if (r.ok) { setSent(true); onSent(text); setTimeout(onClose, 1800); } } catch {} finally { setSending(false); } }
+
+function BarberPicker({ id }: { id: string }) {
+  const [d, setD] = useState<any>(null); const [busy, setBusy] = useState(false); const [note, setNote] = useState("");
+  const load = useCallback(async () => { try { const r = await aiFetch(`/api/clients/${id}/barber`); const j = await r.json(); if (r.ok) setD(j); } catch {} }, [id]);
+  useEffect(() => { load(); }, [load]);
+  if (!d) return null;
+  const primary = d.links.find((l: any) => l.is_primary);
+  async function set(v: string) {
+    setBusy(true); setNote("");
+    try { const r = await aiFetch(`/api/clients/${id}/barber`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ barber_id: v || null }) }); const j = await r.json(); if (!r.ok) throw new Error(j.error); setNote("Saved"); await load(); }
+    catch (e: any) { setNote(e?.message || "Couldn't save"); } setBusy(false);
+  }
   return (
-    <>
-      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-[440px] z-50 flex flex-col border-l border-[#2A1852]" style={{ background: "#05080F" }}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#2A1852] flex-shrink-0">
-          <div><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-0.5">Compose SMS</div><div className="text-sm font-semibold text-white">{c.name}</div><div className="text-[10px] text-slate-600">{c.phone}</div></div>
-          <button onClick={onClose} className="w-7 h-7 rounded-md border border-[#2A1852] text-slate-500 hover:text-white flex items-center justify-center transition-all"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-5">
-          <div className="rounded-lg p-4 mb-4 border" style={{ background: `${meta.hex}08`, borderColor: `${meta.hex}25` }}>
-            <div className="flex items-center justify-between mb-1.5"><span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: meta.hex }}>{meta.label}</span><span className="text-[9px] px-2 py-0.5 rounded font-medium" style={{ background: `${meta.hex}15`, color: meta.hex }}>{meta.discount}</span></div>
-            <p className="text-xs text-slate-500">{meta.strategy}</p>
-            <div className="flex gap-4 mt-3 pt-3 border-t border-[#2A1852] text-[9px]">
-              {[{ l: "CLV", v: `$${c.clv?.toFixed(0) || 0}` }, { l: "ΔV", v: `+$${c.intervention_value?.toFixed(2) || 0}` }, { l: "Gap", v: `${c.gap_ratio?.toFixed(2) || 0}×` }, { l: "Overdue", v: `${c.days_overdue || 0}d` }].map(({ l, v }) => (
-                <div key={l}><div className="text-slate-600 mb-0.5">{l}</div><div className="text-white font-semibold">{v}</div></div>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-center justify-between mb-1.5"><span className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Message</span><span className={`text-[9px] font-mono ${text.length > 140 ? "text-amber-400" : "text-slate-600"}`}>{text.length}/160</span></div>
-          <textarea value={text} onChange={e => setText(e.target.value)} rows={5} maxLength={160} className="w-full rounded-lg px-4 py-3 text-sm text-white resize-none focus:outline-none border border-[#2A1852] focus:border-[#7C3AED]/40 transition-all" style={{ background: "#0F0A1E" }} placeholder={`Message to ${c.name?.split(" ")[0]}...`} />
-          <div className="h-0.5 rounded-full mt-1.5 mb-3" style={{ background: "#2A1852" }}><div className="h-full rounded-full transition-all" style={{ width: `${Math.min((text.length/160)*100,100)}%`, background: text.length > 160 ? "#F43F5E" : "#7C3AED" }} /></div>
-          <button onClick={generate} disabled={gen} className="w-full py-2.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 disabled:opacity-40" style={{ background: "rgba(91,33,182,0.15)", border: "1px solid rgba(91,33,182,0.3)", color: "#A78BFA" }}>
-            {gen ? <><div className="w-3 h-3 border border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin" />Generating...</> : "✦ Write with AI"}
-          </button>
-          {text && <div className="mt-4 rounded-lg p-3 border border-[#2A1852]" style={{ background: "#0F0A1E" }}><div className="text-[9px] text-slate-600 uppercase tracking-wider mb-2">Preview</div><div className="flex justify-end"><div className="max-w-[80%] bg-[#1D4ED8] rounded-2xl rounded-tr-sm px-3 py-2"><p className="text-white text-xs leading-relaxed">{text}</p></div></div></div>}
-        </div>
-        <div className="flex-shrink-0 border-t border-[#2A1852] px-5 py-4">
-          {sent ? <div className="flex items-center justify-center gap-2 py-3 rounded-lg border" style={{ background: "rgba(52,211,153,0.06)", borderColor: "rgba(52,211,153,0.2)" }}><svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg><span className="text-emerald-400 text-sm font-medium">Sent</span></div> : (
-            <div className="flex gap-2">
-              <button onClick={onClose} className="flex-1 py-2.5 rounded-lg text-sm text-slate-400 border border-[#2A1852] hover:text-white transition-all">Cancel</button>
-              <button onClick={send} disabled={!text.trim() || sending || !c.phone} className="flex-[2] py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-40 flex items-center justify-center gap-2 transition-all" style={{ background: "#5B21B6" }}>
-                {sending ? <><div className="w-3.5 h-3.5 border border-white/30 border-t-white rounded-full animate-spin" />Sending...</> : "Send SMS"}
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    </>
+    <div className="mt-3 flex items-center gap-2 text-xs">
+      <span style={{ color: MUTED }}>Their barber</span>
+      <select disabled={busy || !d.available} value={primary?.barber_id ?? ""} onChange={(e) => set(e.target.value)} className="rounded-md px-2 py-1 text-xs outline-none text-white" style={{ background: "#0A0612", border: `1px solid ${BDR}` }}>
+        <option value="">{d.available ? "Not set" : "Run the barber SQL first"}</option>{d.barbers.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
+      </select>
+      {primary && <span style={{ color: MUTED }}>{primary.source === "manual" ? "set by hand" : `${primary.visits} visits together`}</span>}
+      {note && <span style={{ color: note === "Saved" ? GREEN : RED }}>{note}</span>}
+    </div>
   );
 }
- 
-export default function ClientProfilePage() {
-  const params = useParams();
-  const userId = params?.id as string;
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [drawer, setDrawer] = useState(false);
-  const [activeTab, setActiveTab] = useState<"overview"|"outreach"|"visits"|"action"|"diary">("overview");
-  const [localOutreach, setLocalOutreach] = useState<any[]>([]);
+
+export default function ClientPage() {
+  const { id } = useParams() as { id: string };
   const VENUE_ID = process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID || "e1a6c15d-8ccc-4f58-aefb-8bea46e39918";
- 
-  useEffect(() => {
-    if (!userId) return;
-    fetch(`/api/clients/${userId}?venue_id=${VENUE_ID}`)
-      .then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.error); return d; })
-      .then(d => { setData(d); setLocalOutreach(d.outreach || []); })
-      .catch(e => setError(e.message)).finally(() => setLoading(false));
-  }, [userId]);
- 
-  if (loading) return <div className={`min-h-screen ${BG} flex items-center justify-center`}><div className="text-center"><div className="w-10 h-10 border border-[#7C3AED]/20 border-t-indigo-500 rounded-full animate-spin mx-auto mb-3" /><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Loading profile</div></div></div>;
-  if (error || !data) return <div className={`min-h-screen ${BG} flex items-center justify-center`}><div className="text-center"><div className="text-[9px] font-bold uppercase tracking-widest text-rose-400 mb-2">Client not found</div><p className="text-xs text-slate-600 mb-4">{error}</p><a href="/merchant/clients" className="text-xs text-[#A78BFA] hover:text-[#C4B5FD]">← Back to clients</a></div></div>;
- 
-  const { customer: c, events } = data;
-  const meta = STATE_META[c.markov_state] || STATE_META.R_at_risk;
-  const initials = c.name.split(" ").map((n: string) => n[0]).slice(0,2).join("").toUpperCase();
-  const churnHex = (c.churn_score||0) > 0.6 ? "#F43F5E" : (c.churn_score||0) > 0.35 ? "#FB923C" : "#34D399";
-  const loyalHex = (c.loyalty_score||0) > 0.6 ? "#34D399" : (c.loyalty_score||0) > 0.3 ? "#FBBF24" : "#F43F5E";
-  const gaps = (c.gaps || []).slice(-10).map((g: number, i: number) => ({ v: `V${i+2}`, gap: g, avg: c.avg_gap_days }));
-  const monthlySpend: Record<string, number> = {};
-  (events || []).forEach((e: any) => { if (e.revenue > 0) { const m = new Date(e.date).toLocaleDateString("en-AU", { month: "short", year: "2-digit" }); monthlySpend[m] = (monthlySpend[m]||0) + e.revenue; }});
-  const spendData = Object.entries(monthlySpend).slice(-8).map(([month, revenue]) => ({ month, revenue }));
-  const outCount = localOutreach.length;
-  const delivCount = localOutreach.filter((o: any) => ["delivered","queued","sent"].includes(o.status)).length;
- 
+  const [d, setD] = useState<any>(null);
+  const [err, setErr] = useState(""); const [loading, setLoading] = useState(true);
+  const [brief, setBrief] = useState<any>(null); const [briefLoading, setBriefLoading] = useState(false);
+  const [text, setText] = useState(""); const [drafting, setDrafting] = useState(false);
+  const [sending, setSending] = useState(false); const [sendNote, setSendNote] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [showDiary, setShowDiary] = useState(false);
+  const composerRef = useRef<HTMLDivElement>(null);
+
+  const load = useCallback(async () => {
+    try { const r = await aiFetch(`/api/clients/${id}`); const j = await r.json(); if (!r.ok) throw new Error(j.error || "Could not load this client"); setD(j); setErr(""); }
+    catch (e: any) { setErr(e?.message || "Could not load this client"); } finally { setLoading(false); }
+  }, [id]);
+  const loadBrief = useCallback(async (force = false) => {
+    const key = `rydra-brief-${id}`;
+    if (!force) { try { const c = JSON.parse(sessionStorage.getItem(key) || "null"); if (c && Date.now() - c.at < 600_000) { setBrief(c.b); return; } } catch {} }
+    setBriefLoading(true);
+    try { const r = await aiFetch(`/api/clients/${id}/brief`, { method: "POST" }); const j = await r.json(); if (r.ok) { setBrief(j); try { sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), b: j })); } catch {} } } catch {}
+    setBriefLoading(false);
+  }, [id]);
+  useEffect(() => { load(); loadBrief(); }, [load, loadBrief]);
+
+  const c = d?.me;
+  const row = useMemo(() => c ? ({ state: c.markov_state, booked: c.has_upcoming_booking, visits: c.visits, gap_ratio: c.gap_ratio } as ClientRow) : null, [c]);
+  const status = row ? dueStatus(row) : "ontrack";
+  const gapData = useMemo(() => (d?.gaps ?? []).slice(-14).map((g: number, i: number, a: number[]) => ({ n: `#${(d.gaps.length - a.length) + i + 2}`, gap: g })), [d]);
+  const spendData = useMemo(() => (d?.events ?? []).filter((e: any) => e.revenue > 0 && !/cancel|no.?show/i.test(e.type)).slice(0, 14).reverse().map((e: any) => ({ date: dshort(e.date), revenue: e.revenue })), [d]);
+
+  const timeline = useMemo(() => {
+    if (!d) return [] as any[];
+    const v = d.events.map((e: any) => ({ kind: "visit", at: e.date, ...e }));
+    const t = d.outreach.map((o: any) => ({ kind: "text", at: String(o.sent_at).slice(0, 10), ...o }));
+    return [...v, ...t].sort((a, b) => String(b.at).localeCompare(String(a.at)) || (a.kind === "text" ? -1 : 1));
+  }, [d]);
+  const sent = d?.outreach.filter((o: any) => !o.failed) ?? [];
+  const worked = sent.filter((o: any) => o.rebooked_in_days !== null).length;
+  const lastText = sent[0];
+  const daysSinceText = lastText ? Math.floor((Date.now() - Date.parse(lastText.sent_at)) / 86400000) : null;
+
+  async function draft() {
+    if (!c) return; setDrafting(true); setSendNote(null);
+    try {
+      const r = await aiFetch("/api/ai/sms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customer: { name: c.name, visits: c.visits, gap_ratio: c.gap_ratio, days_overdue: c.days_since_last_visit, markov_state: c.markov_state, status: c.markov_state === "X" ? "X" : "" } }) });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || "Could not write a message"); setText(j.message || "");
+    } catch (e: any) { setSendNote({ ok: false, msg: e?.message || "Could not write a message" }); }
+    setDrafting(false);
+  }
+  async function send() {
+    if (!c || !text.trim()) return; setSending(true); setSendNote(null);
+    try {
+      const r = await aiFetch("/api/sms/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customer_id: id, message: text, customer_name: c.name, venue_id: VENUE_ID, markov_state: c.markov_state, gap_ratio: c.gap_ratio, days_overdue: c.days_since_last_visit }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "Not sent");
+      setSendNote({ ok: true, msg: "Sent. It will show in the timeline below." }); setText(""); load();
+    } catch (e: any) { setSendNote({ ok: false, msg: e?.message || "Not sent" }); }
+    setSending(false);
+  }
+
+  if (loading) return <div className="min-h-screen flex items-center justify-center text-sm" style={{ background: "#0A0612", color: MUTED }}>Loading client...</div>;
+  if (err || !d || !c) return <div className="min-h-screen flex flex-col items-center justify-center gap-3 text-sm" style={{ background: "#0A0612" }}><div style={{ color: RED }}>{err || "Client not found"}</div><a href="/merchant/clients" className="underline" style={{ color: PUR_LL }}>Back to all clients</a></div>;
+
+  const s = d.stats; const m = DUE_META[status];
+  const odds = Math.round((1 - c.churn_score) * 100);
+  const initials = c.name.split(" ").map((n: string) => n[0]).slice(0, 2).join("").toUpperCase();
+  const tierLabel = s.percentile ? (s.percentile <= 10 ? "VIP" : s.percentile <= 30 ? "Core" : "Regular") : "Regular";
+  const dueText = c.has_upcoming_booking ? `Booked for ${dshort(c.last_visit_local)}` : s.nextDue ? (s.daysToDue < 0 ? `Expected ${dshort(s.nextDue)} (${-s.daysToDue} days late)` : s.daysToDue === 0 ? "Expected today" : `Expected ${dshort(s.nextDue)} (in ${s.daysToDue} days)`) : c.visits <= 1 ? "Needs a second visit to predict" : "No rhythm yet";
+  const maxH = Math.max(1, ...d.habits.dow);
+  const hrs = d.habits.hours ? Object.entries(d.habits.hours as Record<string, number>) : [];
+  const hMax = Math.max(1, ...hrs.map(([, v]) => v));
+
   return (
-    <div className={`min-h-screen ${BG} text-white pb-16`}>
-      {drawer && <SmsDrawer customer={c} onClose={() => setDrawer(false)} onSent={msg => setLocalOutreach(p => [{ id: Date.now(), message: msg, status: "queued", markov_state: c.markov_state, sent_at: new Date().toISOString(), cost: "0.08" }, ...p])} />}
- 
-      {/* Nav */}
-      <div className="border-b border-[#0F1829] backdrop-blur-xl sticky top-0 z-30" style={{ background: "rgba(10,6,18,0.97)" }}>
+    <div className="min-h-screen text-white pb-20" style={{ background: "#0A0612" }}>
+      <div className="sticky top-0 z-30 border-b" style={{ background: "rgba(10,6,18,0.97)", borderColor: "#0F1829", backdropFilter: "blur(12px)" }}>
         <div className="max-w-[1400px] mx-auto px-8 h-14 flex items-center gap-6">
-          <div className="flex items-center gap-3 flex-shrink-0">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "linear-gradient(135deg, #5B21B6 0%, #D4A017 100%)" }}><svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg></div>
-            <div><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Rydra</div><div className="text-sm font-semibold text-white leading-none truncate max-w-[160px]">{c.name}</div></div>
-          </div>
-          <nav className="flex items-center gap-1">
-            {NAV.map(tab => <a key={tab.href} href={tab.href} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${(tab as any).active ? "bg-[#5B21B6] text-white" : "text-slate-400 hover:text-white hover:bg-white/[0.05]"}`}>{tab.label}</a>)}
-          </nav>
-          <a href="/merchant/clients" className="ml-auto text-[10px] text-slate-600 hover:text-slate-300 transition-colors flex items-center gap-1 flex-shrink-0">
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-            All clients
-          </a>
+          <div className="flex items-center gap-3"><div className="w-7 h-7 rounded-lg" style={{ background: `linear-gradient(135deg, ${PUR}, ${GOLD})` }} /><div><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Rydra</div><div className="text-sm font-semibold leading-none truncate max-w-[200px]">{c.name}</div></div></div>
+          <nav className="flex items-center gap-1">{NAV.map((t) => <a key={t.href} href={t.href} className={`px-3.5 py-1.5 rounded-md text-xs font-medium ${t.active ? "bg-[#5B21B6] text-white" : "text-slate-400 hover:text-white hover:bg-white/5"}`}>{t.label}</a>)}</nav>
+          <a href="/merchant/clients" className="ml-auto text-[11px] hover:text-white" style={{ color: MUTED }}>&larr; All clients</a>
         </div>
       </div>
- 
-      <div className="max-w-[1400px] mx-auto px-8 py-8">
- 
+
+      <div className="max-w-[1400px] mx-auto px-8 pt-8 space-y-6">
         {/* Hero */}
-        <div className={`${CARD} border ${BDR} rounded-xl p-6 mb-6 flex items-center gap-6`}>
-          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-white font-bold text-xl flex-shrink-0" style={{ background: `${meta.hex}18`, border: `1px solid ${meta.hex}35` }}>{initials}</div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-3 mb-1.5 flex-wrap">
-              <h1 className="text-2xl font-bold text-white tracking-tight">{c.name}</h1>
-              <span className="text-[9px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-md" style={{ background: `${meta.hex}15`, border: `1px solid ${meta.hex}30`, color: meta.hex }}>{meta.label}</span>
+        <div className="rounded-xl p-6 border flex flex-wrap items-center gap-6" style={{ background: CARD, borderColor: BDR }}>
+          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-xl font-bold flex-shrink-0" style={{ background: `${m.color}18`, border: `1px solid ${m.color}40`, color: m.color }}>{initials}</div>
+          <div className="flex-1 min-w-[260px]">
+            <div className="flex items-center gap-2.5 flex-wrap mb-1.5">
+              <h1 className="text-2xl font-bold tracking-tight">{c.name}</h1>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ color: m.color, background: `${m.color}1f` }}>{m.label}</span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ color: tierLabel === "VIP" ? GOLD : PUR_LL, background: `${tierLabel === "VIP" ? GOLD : PUR_LL}1f` }}>{tierLabel}</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ color: MUTED, background: CARD2 }}>{STATE_NAME[c.markov_state]}</span>
             </div>
-            <div className="flex items-center gap-4 text-[11px] text-slate-500 flex-wrap">
-              {c.phone && <span>{c.phone}</span>}
-              {c.email && <span>{c.email}</span>}
-              {c.fav_day && <span>Usually {c.fav_day}s</span>}
-              {c.last_visit && <span>Last visit {new Date(c.last_visit).toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" })}</span>}
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px]" style={{ color: MUTED }}>
+              {d.contact.phone && <span>{d.contact.phone}</span>}{d.contact.email && <span>{d.contact.email}</span>}
+              {s.firstVisit && <span>Client since {dshort(s.firstVisit)}</span>}
+              {s.ltvRank && <span>#{s.ltvRank} of {s.of} by spend (top {s.percentile}%)</span>}
             </div>
+            <div className="mt-3 inline-flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg" style={{ background: `${m.color}14`, color: m.color }}>{dueText}</div>
+            <BarberPicker id={id} />
           </div>
-          <button onClick={() => setDrawer(true)} disabled={!c.phone}
-            className="flex-shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white transition-all disabled:opacity-40"
-            style={{ background: "#5B21B6", boxShadow: "0 4px 20px rgba(91,33,182,0.3)" }}>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
-            Send SMS
-          </button>
+          <div className="text-center px-4"><div className="text-4xl font-bold" style={{ color: odds >= 70 ? GREEN : odds >= 45 ? GOLD : RED }}>{odds}%</div><div className="text-[10px] uppercase tracking-widest" style={{ color: MUTED }}>chance they return</div></div>
+          <button onClick={() => { composerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); if (!text) draft(); }} disabled={c.sms_status !== "ok"} className="px-6 py-3 rounded-lg text-sm font-bold disabled:opacity-40" style={{ background: `linear-gradient(135deg, ${PUR}, ${GOLD})` }}>{c.sms_status === "ok" ? "Reach out" : "Can't text"}</button>
         </div>
- 
-        {/* Top metrics */}
-        <div className="grid grid-cols-6 gap-3 mb-6">
+
+        {/* AI brief */}
+        <div className="rounded-xl p-5 border" style={{ background: "linear-gradient(135deg, #1B1240, #130C24)", borderColor: `${PUR_L}66` }}>
+          <div className="flex items-start justify-between gap-4">
+            <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: PUR_LL }}>Before they sit down{brief?.source === "data" ? " (from your data)" : ""}</div>
+            <button onClick={() => loadBrief(true)} disabled={briefLoading} className="text-[11px] underline disabled:opacity-40" style={{ color: MUTED }}>{briefLoading ? "Thinking..." : "Refresh"}</button>
+          </div>
+          {brief ? (
+            <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-6 mt-2">
+              <div><div className="text-lg font-semibold leading-snug">{brief.headline}</div><ul className="mt-3 space-y-1.5">{brief.points.map((p: string, i: number) => <li key={i} className="text-sm text-slate-300 flex gap-2"><span style={{ color: PUR_LL }}>•</span>{p}</li>)}</ul></div>
+              <div className="rounded-lg p-4" style={{ background: "#0A0612AA", border: `1px solid ${BDR}` }}><div className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: GOLD }}>Best next move</div><div className="font-semibold">{brief.move}</div><div className="text-xs mt-1.5 text-slate-400">{brief.why}</div></div>
+            </div>
+          ) : <div className="text-sm mt-3" style={{ color: MUTED }}>{briefLoading ? "Reading their history..." : "Brief unavailable right now."}</div>}
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           {[
-            { l: "Lifetime Visits",  v: c.total_visits,                             sub: `Every ${c.avg_gap_days}d avg`,  acc: "#7C3AED" },
-            { l: "Total Revenue",    v: `$${c.total_revenue?.toFixed(0) || 0}`,      sub: `$${c.avg_rev_per_visit?.toFixed(0) || 0}/visit`, acc: "#D4A017" },
-            { l: "CLV",              v: `$${c.clv?.toFixed(0) || 0}`,               sub: "Lifetime value",                acc: "#34D399" },
-            { l: "Days Overdue",     v: c.days_overdue,                              sub: `Gap ${c.gap_ratio?.toFixed(2) || 0}×`, acc: c.days_overdue > 60 ? "#F43F5E" : c.days_overdue > 30 ? "#FB923C" : "#34D399" },
-            { l: "SMS Sent",         v: outCount,                                    sub: `${delivCount} delivered`,       acc: "#38BDF8" },
-            { l: "Intervention ΔV",  v: `+$${c.intervention_value?.toFixed(2) || 0}`, sub: `${Math.round((c.intervention_lift||0)*100)}% lift`, acc: "#34D399" },
-          ].map(({ l, v, sub, acc }) => (
-            <div key={l} className={`${CARD} border ${BDR} rounded-xl p-4 relative overflow-hidden hover:border-[#3A2268] transition-all`}>
-              <div className="absolute left-0 top-3 bottom-3 w-[2px] rounded-r-full" style={{ background: acc }} />
-              <div className="pl-3">
-                <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-2">{l}</div>
-                <div className="text-2xl font-bold tracking-tight text-white mb-0.5">{v}</div>
-                <div className="text-[10px] text-slate-600">{sub}</div>
-              </div>
-            </div>
-          ))}
+            ["Visits", String(c.visits), s.tenureDays ? `over ${Math.round(s.tenureDays / 30)} months` : ""],
+            ["Lifetime spend", $(c.clv_aud), s.ltvRank ? `#${s.ltvRank} of ${s.of}` : ""],
+            ["Typical spend", $(s.avgTicket), s.ticketDelta === null ? "per visit" : s.ticketDelta > 1 ? `trending up ${$(s.ticketDelta)}` : s.ticketDelta < -1 ? `trending down ${$(-s.ticketDelta)}` : "steady"],
+            ["Comes every", s.avgGap ? `${s.avgGap} days` : "–", d.trend ? d.trend.label.split(" (")[0] : ""],
+            ["Yearly value", s.annualValue ? $(s.annualValue) : "–", "at their current pace"],
+            ["No-shows", String(s.noShows + s.cancels), `${s.noShows} no-show, ${s.cancels} cancelled`],
+          ].map(([l, v, sub]) => <div key={l} className="rounded-xl p-4 border" style={{ background: CARD, borderColor: BDR }}><div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: MUTED }}>{l}</div><div className="text-2xl font-bold mt-1">{v}</div><div className="text-[11px] text-slate-500 mt-0.5">{sub}</div></div>)}
         </div>
- 
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
-          {/* Gauges */}
-          <div className={`${CARD} border ${BDR} rounded-xl p-5 flex flex-col items-center justify-center gap-3`}>
-            <ArcGauge value={(c.churn_score||0)*10} hex={churnHex} label="Churn Risk" />
-            <ArcGauge value={(c.loyalty_score||0)*10} hex={loyalHex} label="Loyalty Score" />
+
+        <div className="grid grid-cols-1 xl:grid-cols-[1.25fr_1fr] gap-6">
+          <div className="space-y-6">
+            <Box title="Rhythm" sub={d.trend ? d.trend.label : "Days between each visit, against their average"}>
+              {gapData.length >= 2 ? (
+                <div style={{ height: 200 }}><ResponsiveContainer width="100%" height="100%"><ComposedChart data={gapData} margin={{ left: -12, right: 8, top: 8 }}>
+                  <XAxis dataKey="n" tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} unit="d" />
+                  <Tooltip contentStyle={TIP} cursor={{ fill: "#ffffff08" }} formatter={(v: any) => [`${v} days`, "Gap before this visit"]} />
+                  <Bar dataKey="gap" radius={[3, 3, 0, 0]}>{gapData.map((g: any, i: number) => <Cell key={i} fill={s.avgGap && g.gap > s.avgGap * 1.4 ? GOLD : PUR_L} fillOpacity={0.85} />)}</Bar>
+                  {s.avgGap > 0 && <ReferenceLine y={s.avgGap} stroke={GREEN} strokeDasharray="4 4" label={{ value: `avg ${s.avgGap}d`, fill: GREEN, fontSize: 10, position: "insideTopRight" }} />}
+                  {c.days_since_last_visit > 0 && !c.has_upcoming_booking && <ReferenceLine y={c.days_since_last_visit} stroke={m.color} strokeDasharray="2 3" label={{ value: `now ${c.days_since_last_visit}d`, fill: m.color, fontSize: 10, position: "insideBottomRight" }} />}
+                </ComposedChart></ResponsiveContainer></div>
+              ) : <div className="text-sm py-10 text-center" style={{ color: MUTED }}>Needs at least 3 visits to show a rhythm.</div>}
+            </Box>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <Box title="Spend per visit">
+                {spendData.length >= 2 ? <div style={{ height: 150 }}><ResponsiveContainer width="100%" height="100%"><ComposedChart data={spendData} margin={{ left: -20, right: 6, top: 6 }}><XAxis dataKey="date" tick={{ fontSize: 9, fill: MUTED }} axisLine={false} tickLine={false} interval="preserveStartEnd" /><YAxis tick={{ fontSize: 9, fill: MUTED }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v}`} /><Tooltip contentStyle={TIP} formatter={(v: any) => [$(Number(v)), "Spent"]} /><Line dataKey="revenue" stroke={GOLD} strokeWidth={2} dot={{ r: 3, fill: GOLD }} /></ComposedChart></ResponsiveContainer></div> : <div className="text-sm py-8 text-center" style={{ color: MUTED }}>No spend history yet.</div>}
+              </Box>
+              <Box title="When they come" sub={d.habits.favDay !== null ? `Mostly ${DOW[d.habits.favDay]}s` : undefined}>
+                <div className="flex items-end gap-1.5 h-24">{d.habits.dow.map((n: number, i: number) => <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1 h-full"><div className="w-full rounded-t" style={{ height: `${(n / maxH) * 100}%`, minHeight: n ? 4 : 2, background: n === Math.max(...d.habits.dow) && n > 0 ? GOLD : n ? PUR_L : CARD2 }} /><div className="text-[9px]" style={{ color: MUTED }}>{DOW[i]}</div></div>)}</div>
+                {hrs.length > 0 && <div className="mt-3 space-y-1">{hrs.map(([k, v]) => <div key={k} className="flex items-center gap-2 text-[11px]"><div className="w-16 capitalize" style={{ color: MUTED }}>{k}</div><div className="flex-1 h-1.5 rounded-full" style={{ background: CARD2 }}><div className="h-full rounded-full" style={{ width: `${(v / hMax) * 100}%`, background: PUR_L }} /></div><div className="w-5 text-right">{v}</div></div>)}</div>}
+              </Box>
+            </div>
+            {d.barbers.length > 0 && (
+              <Box title="Barber loyalty" sub={d.barbers[0].share >= 0.8 ? `Loyal to ${d.barbers[0].name}. If ${d.barbers[0].name} is away, expect a skipped visit.` : "Sees a mix of barbers"}>
+                <div className="space-y-2">{d.barbers.map((b: any) => <div key={b.name} className="flex items-center gap-3 text-sm"><div className="w-24 truncate">{b.name}</div><div className="flex-1 h-2 rounded-full" style={{ background: CARD2 }}><div className="h-full rounded-full" style={{ width: `${b.share * 100}%`, background: `linear-gradient(90deg, ${PUR}, ${PUR_L})` }} /></div><div className="w-24 text-right text-xs" style={{ color: MUTED }}>{b.visits} visits · {Math.round(b.share * 100)}%</div></div>)}</div>
+              </Box>
+            )}
           </div>
- 
-          {/* Markov */}
-          <div className="rounded-xl p-5 border" style={{ background: `${meta.hex}06`, borderColor: `${meta.hex}20` }}>
-            <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-3">Markov State</div>
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-lg font-bold" style={{ color: meta.hex }}>{meta.label}</span>
-              <span className="ml-auto text-[9px] px-2 py-0.5 rounded font-bold uppercase tracking-wider" style={{ background: `${meta.hex}15`, color: meta.hex }}>{meta.discount}</span>
-            </div>
-            <p className="text-xs text-slate-500 leading-relaxed mb-4">{meta.strategy}</p>
-            <div className="grid grid-cols-2 gap-2 text-[10px] pt-3 border-t border-[#2A1852]">
-              {[{ l: "Natural rebook", v: `${Math.round((c.natural_rebook||0)*100)}%` }, { l: "Post-SMS", v: `${Math.round((c.sms_rebook||0)*100)}%`, highlight: true }, { l: "Lift", v: `+${Math.round((c.intervention_lift||0)*100)}pp`, highlight: true }, { l: "SMS cost", v: "$0.08" }].map(({ l, v, highlight }) => (
-                <div key={l} className="rounded-md p-2" style={{ background: "#0F0A1E" }}><div className="text-slate-600 mb-0.5">{l}</div><div className={`font-bold ${highlight ? "text-emerald-400" : "text-white"}`}>{v}</div></div>
-              ))}
-            </div>
-          </div>
- 
-          {/* ΔV card */}
-          <div className="rounded-xl p-5 border" style={{ background: "rgba(52,211,153,0.04)", borderColor: "rgba(52,211,153,0.18)" }}>
-            <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-2">Intervention Value (ΔV)</div>
-            <div className="text-4xl font-bold tracking-tight text-emerald-400 mb-1">{c.intervention_value > 0 ? `+$${c.intervention_value.toFixed(2)}` : "—"}</div>
-            <div className="text-[10px] text-slate-600 mb-4">Expected return from one SMS</div>
-            <div className="space-y-1.5 text-[10px] border-t border-[#2A1852] pt-3">
-              {[{ l: "CLV", v: `$${c.clv?.toFixed(2)||0}` }, { l: "Conversion lift", v: `${Math.round((c.intervention_lift||0)*100)}pp` }, { l: "SMS cost", v: "-$0.08" }, { l: "Net ΔV", v: `+$${c.intervention_value?.toFixed(2)||0}`, bold: true }].map(({ l, v, bold }) => (
-                <div key={l} className="flex items-center justify-between"><span className="text-slate-600">{l}</span><span className={bold ? "text-emerald-400 font-bold" : "text-slate-400"}>{v}</span></div>
-              ))}
-            </div>
-          </div>
- 
-          {/* Key metrics */}
-          <div className={`${CARD} border ${BDR} rounded-xl p-5`}>
-            <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-3">Key Metrics</div>
-            <div className="space-y-2">
-              {[
-                { l: "Total visits",    v: c.total_visits },
-                { l: "Avg visit gap",   v: `${c.avg_gap_days}d` },
-                { l: "Gap ratio",       v: `${c.gap_ratio?.toFixed(2)||0}×`, col: c.gap_ratio > 1.5 ? "#F43F5E" : c.gap_ratio > 1 ? "#FB923C" : "#34D399" },
-                { l: "Days overdue",    v: c.days_overdue },
-                { l: "Lifetime value",  v: `$${c.clv?.toFixed(2)||0}`, col: "#34D399" },
-                { l: "Last visit",      v: c.last_visit ? new Date(c.last_visit).toLocaleDateString("en-AU") : "—" },
-                { l: "Risk segment",    v: c.risk_segment || "—" },
-              ].map(({ l, v, col }) => (
-                <div key={l} className="flex items-center justify-between py-1 border-b border-[#0F1529]">
-                  <span className="text-[10px] text-slate-600">{l}</span>
-                  <span className="text-[10px] font-semibold" style={{ color: col || "#fff" }}>{v}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
- 
-        {/* Tabs */}
-        <div className="flex gap-1 mb-5 border-b border-[#2A1852]">
-          {(["overview","outreach","visits","action","diary"] as const).map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2.5 text-xs font-semibold uppercase tracking-wider transition-all capitalize border-b-2 -mb-px ${activeTab === tab ? "border-[#7C3AED] text-[#A78BFA]" : "border-transparent text-slate-600 hover:text-slate-300"}`}>
-              {tab === "action" ? "Action" : tab === "diary" ? "Diary" : tab}
-            </button>
-          ))}
-        </div>
- 
-        {/* Overview */}
-        {activeTab === "overview" && (
-          <div className="grid grid-cols-2 gap-5">
-            <div className={`${CARD} border ${BDR} rounded-xl p-5`}>
-              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-4">Visit Gap Trend</div>
-              {gaps.length > 1 ? (
-                <ResponsiveContainer width="100%" height={200}>
-                  <LineChart data={gaps}><XAxis dataKey="v" stroke="#3A2268" fontSize={10} tick={{ fill: "#475569" }} /><YAxis stroke="#3A2268" fontSize={10} tick={{ fill: "#475569" }} unit="d" /><Tooltip contentStyle={TIP} formatter={(v: any) => [`${v}d`, ""]} /><ReferenceLine y={c.avg_gap_days} stroke="#5B21B6" strokeDasharray="3 3" /><Line type="monotone" dataKey="gap" stroke="#FB923C" strokeWidth={2} dot={{ fill: "#FB923C", r: 3 }} /></LineChart>
-                </ResponsiveContainer>
-              ) : <div className="flex items-center justify-center h-48 text-[10px] text-slate-700 uppercase tracking-wider">Not enough visits for trend</div>}
-            </div>
-            {spendData.length > 0 ? (
-              <div className={`${CARD} border ${BDR} rounded-xl p-5`}>
-                <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-4">Monthly Spend</div>
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={spendData} margin={{ left: -20 }}><XAxis dataKey="month" stroke="#3A2268" fontSize={10} tick={{ fill: "#475569" }} /><YAxis stroke="#3A2268" fontSize={10} tick={{ fill: "#475569" }} tickFormatter={(v: number) => `$${v}`} /><Tooltip contentStyle={TIP} formatter={(v: any) => [`$${Number(v).toFixed(0)}`, "Spend"]} /><Bar dataKey="revenue" fill="#34D399" radius={[3,3,0,0]} /></BarChart>
-                </ResponsiveContainer>
-              </div>
-            ) : <div className={`${CARD} border ${BDR} rounded-xl p-5 flex items-center justify-center`}><span className="text-[10px] text-slate-700 uppercase tracking-wider">No spend data</span></div>}
-          </div>
-        )}
- 
-        {/* Outreach */}
-        {activeTab === "outreach" && (
-          <div className={`${CARD} border ${BDR} rounded-xl p-5`}>
-            <div className="flex items-center justify-between mb-5">
-              <div><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-0.5">Communication History</div><div className="text-sm font-semibold text-white">{outCount} messages · {delivCount} delivered</div></div>
-              <button onClick={() => setDrawer(true)} disabled={!c.phone} className="px-4 py-2 rounded-md text-xs font-semibold text-white disabled:opacity-40 transition-all" style={{ background: "#5B21B6" }}>+ New SMS</button>
-            </div>
-            {localOutreach.length === 0 ? (
-              <div className="text-center py-12"><div className="text-[9px] font-bold uppercase tracking-widest text-slate-700 mb-3">No messages yet</div><button onClick={() => setDrawer(true)} disabled={!c.phone} className="px-4 py-2 rounded-md text-xs font-semibold text-white disabled:opacity-40" style={{ background: "#5B21B6" }}>Send First Message</button></div>
-            ) : (
-              <div className="space-y-2">
-                {localOutreach.map((o: any) => (
-                  <div key={o.id} className={`rounded-lg border ${BDR} p-4 hover:border-[#3A2268] transition-all`} style={{ background: "#0F0A1E" }}>
-                    <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full" style={{ background: ["delivered","queued","sent"].includes(o.status) ? "#34D399" : "#F43F5E" }} />
-                        <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: ["delivered","queued","sent"].includes(o.status) ? "#34D399" : "#F43F5E" }}>{o.status}</span>
-                        {o.markov_state && STATE_META[o.markov_state] && <span className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: STATE_META[o.markov_state].hex }}>{STATE_META[o.markov_state].label}</span>}
-                      </div>
-                      <span className="text-[9px] text-slate-600">{new Date(o.sent_at).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+
+          <div className="space-y-6">
+            <div ref={composerRef}>
+              <Box title="Reach out" sub={c.sms_status === "ok" ? "Written by AI from their history. Edit anything before it goes." : "This client can't be texted (opted out, on hold, or no valid mobile)."}>
+                {c.sms_status === "ok" ? (
+                  <>
+                    {c.has_upcoming_booking && <div className="text-xs rounded-lg p-2.5 mb-3" style={{ background: "#0F2A3A", color: "#7DD3FC" }}>They're already booked for {dshort(c.last_visit_local)}. A text isn't needed.</div>}
+                    {daysSinceText !== null && daysSinceText < 7 && <div className="text-xs rounded-lg p-2.5 mb-3" style={{ background: "#2A2108", color: GOLD }}>Texted {daysSinceText === 0 ? "today" : `${daysSinceText} day${daysSinceText === 1 ? "" : "s"} ago`}. Give them space before another.</div>}
+                    <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} placeholder="Click 'Write it for me', or type your own..." className="w-full rounded-lg p-3 text-sm outline-none resize-none" style={{ background: "#0A0612", border: `1px solid ${BDR}` }} />
+                    <div className="flex justify-between text-[10px] mt-1" style={{ color: text.length > 130 ? GOLD : MUTED }}><span>The opt-out line is added automatically.</span><span>{text.length} chars</span></div>
+                    <div className="flex gap-2 mt-3">
+                      <button onClick={draft} disabled={drafting} className="flex-1 py-2.5 rounded-lg text-sm font-semibold border disabled:opacity-40" style={{ borderColor: PUR_L, color: PUR_LL }}>{drafting ? "Writing..." : text ? "Write another" : "Write it for me"}</button>
+                      <button onClick={send} disabled={sending || !text.trim()} className="flex-1 py-2.5 rounded-lg text-sm font-bold disabled:opacity-30" style={{ background: `linear-gradient(135deg, ${PUR}, ${GOLD})` }}>{sending ? "Sending..." : "Send text"}</button>
                     </div>
-                    <p className="text-sm text-slate-300 leading-relaxed">{o.message}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
- 
-        {/* Visits */}
-        {activeTab === "visits" && (
-          <div className={`${CARD} border ${BDR} rounded-xl p-5`}>
-            <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-5">{events?.length || 0} Appointments on Record</div>
-            {(!events || events.length === 0) ? <div className="text-center py-10 text-[9px] text-slate-700 uppercase tracking-wider">No visit history available</div> : (
-              <div className="space-y-2">
-                {events.map((e: any, idx: number) => (
-                  <div key={idx} className="flex items-center gap-4 py-2.5 border-b border-[#0F1529]">
-                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0" />
-                    <div className="flex-1 text-sm text-white">{new Date(e.date).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}</div>
-                    <div className="text-[10px] text-slate-600 capitalize">{e.type || "appointment"}</div>
-                    {e.revenue > 0 && <div className="text-sm font-semibold text-emerald-400">${e.revenue.toFixed(0)}</div>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
- 
-        {/* Action */}
-        {activeTab === "action" && (
-          <div className="grid grid-cols-2 gap-5">
-            <div className="rounded-xl p-5 border" style={{ background: `${meta.hex}05`, borderColor: `${meta.hex}20` }}>
-              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-3">{meta.label} Strategy</div>
-              <p className="text-sm text-slate-300 leading-relaxed mb-5">{meta.strategy}</p>
-              <div className="grid grid-cols-2 gap-2 text-[10px]">
-                {[{ l: "Natural rebook", v: `${Math.round((c.natural_rebook||0)*100)}%` }, { l: "Post-SMS rebook", v: `${Math.round((c.sms_rebook||0)*100)}%`, h: true }, { l: "Lift from SMS", v: `+${Math.round((c.intervention_lift||0)*100)}pp`, h: true }, { l: "Net ΔV", v: `+$${c.intervention_value?.toFixed(2)||0}`, h: true }, { l: "Urgency", v: c.days_overdue > 90 ? "Critical" : c.days_overdue > 45 ? "High" : "Medium" }, { l: "Discount rule", v: meta.discount }].map(({ l, v, h }) => (
-                  <div key={l} className="rounded-md p-2.5" style={{ background: "#0F0A1E" }}><div className="text-slate-600 mb-0.5">{l}</div><div className={`font-bold ${h ? "text-emerald-400" : "text-white"}`}>{v}</div></div>
-                ))}
-              </div>
+                    {sendNote && <div className="text-xs mt-2" style={{ color: sendNote.ok ? GREEN : "#FDA4AF" }}>{sendNote.msg}</div>}
+                    <div className="text-[10px] mt-3" style={{ color: MUTED }}>Expected value of a text to this client: about {$(Math.max(0, c.intervention_value_aud ?? 0))}. Estimate.</div>
+                  </>
+                ) : <div className="text-sm" style={{ color: MUTED }}>Status: {String(c.sms_status).replace(/_/g, " ")}.</div>}
+              </Box>
             </div>
-            <div className={`${CARD} border ${BDR} rounded-xl p-5`}>
-              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-5">Take Action</div>
-              <div className="space-y-3">
-                <button onClick={() => setDrawer(true)} disabled={!c.phone}
-                  className="w-full py-3.5 rounded-lg text-sm font-semibold text-white transition-all disabled:opacity-40 flex items-center justify-center gap-2"
-                  style={{ background: "#5B21B6", boxShadow: "0 4px 20px rgba(91,33,182,0.25)" }}>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
-                  Send Personalised SMS · +${c.intervention_value?.toFixed(2)||0} expected
-                </button>
-                <a href="/merchant/campaign" className={`w-full py-3.5 rounded-lg text-sm font-medium text-slate-400 hover:text-white border ${BDR} hover:border-[#3A2268] transition-all flex items-center justify-center gap-2`} style={{ background: "#0F0A1E" }}>
-                  Add to Bulk Campaign
-                </a>
-              </div>
-            </div>
+
+            <Box title="Timeline" sub={sent.length ? `${sent.length} text${sent.length === 1 ? "" : "s"} sent. ${worked} followed by a visit within 4 weeks.` : "Visits and texts together, newest first"}>
+              {timeline.length === 0 ? <div className="text-sm py-6 text-center" style={{ color: MUTED }}>No history on record.</div> : (
+                <div className="relative pl-5 max-h-[560px] overflow-y-auto pr-1">
+                  <div className="absolute left-[7px] top-1 bottom-1 w-px" style={{ background: BDR }} />
+                  {timeline.slice(0, 40).map((t: any, i: number) => t.kind === "visit" ? (
+                    <div key={`v${i}`} className="relative mb-3"><div className="absolute -left-[18px] top-1.5 w-2.5 h-2.5 rounded-full" style={{ background: /cancel|no.?show/i.test(t.type) ? RED : PUR_L }} />
+                      <div className="flex justify-between text-sm"><span>{dshort(t.date)} <span className="text-[11px] capitalize" style={{ color: MUTED }}>{/cancel|no.?show/i.test(t.type) ? t.type : "visit"}{t.barber ? ` · ${t.barber}` : ""}</span></span>{t.revenue > 0 && <span style={{ color: GREEN }}>{$(t.revenue)}</span>}</div></div>
+                  ) : (
+                    <div key={`t${i}`} className="relative mb-3"><div className="absolute -left-[18px] top-1.5 w-2.5 h-2.5 rounded-full" style={{ background: t.failed ? RED : GOLD }} />
+                      <div className="rounded-lg p-3" style={{ background: CARD2 }}>
+                        <div className="flex justify-between text-[11px] mb-1" style={{ color: MUTED }}><span>Text · {dshort(t.sent_at)}</span><span style={{ color: t.failed ? RED : t.rebooked_in_days !== null ? GREEN : MUTED }}>{t.failed ? "failed" : t.rebooked_in_days !== null ? `came back ${t.rebooked_in_days === 0 ? "same day" : `${t.rebooked_in_days} day${t.rebooked_in_days === 1 ? "" : "s"} later`}` : "no visit since"}</span></div>
+                        <div className="text-xs text-slate-300 leading-relaxed">{t.message}</div></div></div>
+                  ))}
+                </div>
+              )}
+            </Box>
           </div>
-        )}
-        {/* Diary tab */}
-        {activeTab === "diary" && (
-          <DiaryWidget
-            venueId={VENUE_ID}
-            customerId={userId}
-            customerName={c.name}
-            mode="client"
-          />
-        )}
- 
+        </div>
+
+        <div>
+          <button onClick={() => setShowDiary((v) => !v)} className="text-xs font-semibold px-4 py-2 rounded-lg border" style={{ borderColor: BDR, color: PUR_LL }}>{showDiary ? "Hide" : "Show"} barber diary & notes</button>
+          {showDiary && <div className="mt-4"><DiaryWidget venueId={VENUE_ID} customerId={id} customerName={c.name} mode="client" /></div>}
+        </div>
       </div>
     </div>
   );

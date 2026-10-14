@@ -10,7 +10,7 @@ import { corsHeaders } from "@/lib/ai/cors";
 const PROTECTED = [
   "/merchant",
   "/api/ai", "/api/outreach", "/api/intelligence", "/api/insights",
-  "/api/interventions", "/api/markov", "/api/sms",
+  "/api/interventions", "/api/markov", "/api/sms", "/api/campaigns", "/api/clients", "/api/barber", "/api/barbers", "/api/team", "/api/wallet",
 ];
 // Left open on purpose: they authenticate themselves.
 const OPEN = [

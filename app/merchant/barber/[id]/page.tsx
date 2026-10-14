@@ -1,302 +1,266 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { useParams, useRouter } from "next/navigation";
+// Barber HQ: performance against the team, their book of clients, their wallet, and (for the owner) the manager console.
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { Area, AreaChart, Bar, BarChart, Cell, PolarAngleAxis, PolarGrid, Radar, RadarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { aiFetch } from "@/lib/ai/client";
+import BulkSendModal from "@/app/components/bulk-send";
 import { DiaryWidget } from "@/app/components/diary-widget";
- 
-const BG   = "bg-[#0A0612]";
-const CARD  = "bg-[#130C24]";
-const CARD2 = "bg-[#1A1030]";
-const BDR   = "border-[#2A1852]";
-const TIP   = { backgroundColor: "#130C24", border: "1px solid #3A2268", borderRadius: "4px", color: "#fff", fontSize: "11px" };
+import BarberWallet from "@/app/components/wallet/barber-wallet";
+import OwnerConsole from "@/app/components/wallet/owner-console";
+
+const GOLD = "#D4A017", PUR = "#5B21B6", PUR_L = "#7C3AED", PUR_LL = "#A78BFA", MUTED = "#6B5C8A", GREEN = "#34D399", RED = "#F43F5E", SKY = "#38BDF8";
+const CARD = "#130C24", CARD2 = "#1A1030", BDR = "#2A1852";
+const TIP = { backgroundColor: CARD, border: "1px solid #3A2268", borderRadius: 4, color: "#fff", fontSize: 11 };
 const NAV = [
-  { href: "/merchant/dashboard", label: "Dashboard" },
-  { href: "/merchant/outreach",  label: "Outreach"  },
-  { href: "/merchant/campaign",  label: "Campaign"  },
-  { href: "/merchant/clients",   label: "Clients"   },
-  { href: "/merchant/barber",    label: "Barbers", active: true },
+  { href: "/merchant/dashboard", label: "Dashboard" }, { href: "/merchant/outreach", label: "Outreach" }, { href: "/merchant/campaign", label: "Campaign" },
+  { href: "/merchant/clients", label: "Clients" }, { href: "/merchant/barber", label: "Barbers", active: true },
 ];
- 
-const VENUE_ID = process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID || "e1a6c15d-8ccc-4f58-aefb-8bea46e39918";
- 
-interface CoachMsg { role: "user"|"assistant"; content: string; }
- 
-function MiniCoach({ barber, stats, shopAvg, slug }: { barber: any; stats: any; shopAvg: any; slug: string }) {
-  const router = useRouter();
-  const [brief, setBrief] = useState(""); const [loading, setLoading] = useState(false);
-  const [msgs, setMsgs] = useState<CoachMsg[]>([]); const [input, setInput] = useState(""); const [chatLoading, setChatLoading] = useState(false);
-  const endRef = useRef<HTMLDivElement>(null);
-  const firstName = barber.name.split(" ")[0];
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, chatLoading]);
- 
-  async function generateBrief() {
-    setLoading(true);
-    try { const r = await fetch("/api/ai/rydra-coach", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ barber, stats, shop_avg: shopAvg, type: "daily_brief" }) }); const d = await r.json(); setBrief(d.response || ""); }
-    catch {} finally { setLoading(false); }
-  }
- 
-  async function sendMsg() {
-    if (!input.trim() || chatLoading) return;
-    const msg = input.trim(); setInput(""); setMsgs(p => [...p, { role: "user", content: msg }]); setChatLoading(true);
-    try { const r = await fetch("/api/ai/rydra-coach", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ barber, stats, shop_avg: shopAvg, type: "coach_chat", messages: [...msgs, { role: "user", content: msg }].map(m => ({ role: m.role, content: m.content })), query: msg }) }); const d = await r.json(); setMsgs(p => [...p, { role: "assistant", content: d.response }]); }
-    catch { setMsgs(p => [...p, { role: "assistant", content: "Something went wrong." }]); } finally { setChatLoading(false); }
-  }
- 
-  return (
-    <div className={`${CARD} border ${BDR} rounded-xl overflow-hidden`}>
-      <div className="flex items-center justify-between px-5 py-4 border-b border-[#0F1829]">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-md bg-[#5B21B6] flex items-center justify-center flex-shrink-0"><svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" /></svg></div>
-          <div><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">AI Sales Coach</div><div className="text-sm font-semibold text-white">RydraCoach</div></div>
-        </div>
-        <button onClick={() => router.push(`/merchant/barber/${slug}/coach`)}
-          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-semibold text-white transition-all"
-          style={{ background: "#5B21B6", boxShadow: "0 2px 12px rgba(91,33,182,0.3)" }}>
-          Open Full Coach →
-        </button>
-      </div>
-      <div className="p-5">
-        {brief ? (
-          <div className="rounded-lg p-4 mb-4 text-sm text-slate-300 leading-relaxed whitespace-pre-wrap border border-[#2A1852]" style={{ background: "#0F0A1E" }}>{brief}</div>
-        ) : (
-          <button onClick={generateBrief} disabled={loading}
-            className="w-full py-2.5 mb-4 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 disabled:opacity-40 border border-[#2A1852] text-slate-500 hover:text-slate-200 hover:border-[#3A2268]"
-            style={{ background: "#0F0A1E" }}>
-            {loading ? <><div className="w-3 h-3 border border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin" />Generating...</> : `Generate ${firstName}'s Daily Brief`}
-          </button>
-        )}
-        <div className="border-t border-[#2A1852] pt-4">
-          <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-2">Ask your coach</div>
-          <div className="space-y-2 max-h-40 overflow-y-auto mb-2">
-            {msgs.map((m, i) => (
-              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[85%] rounded-xl px-3 py-2 text-xs ${m.role === "user" ? "bg-[#5B21B6] text-white" : "border border-[#2A1852] text-slate-300"}`} style={m.role === "assistant" ? { background: "#0F0A1E" } : {}}>{m.content}</div>
-              </div>
-            ))}
-            {chatLoading && <div className="flex gap-1 px-3 py-2"><div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" /><div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} /><div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} /></div>}
-            <div ref={endRef} />
-          </div>
-          <div className="flex gap-2 mb-2">
-            <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMsg(); }}} disabled={chatLoading} placeholder={`Ask ${firstName}'s coach...`}
-              className="flex-1 rounded-md px-3 py-2 text-xs text-white placeholder-slate-600 border border-[#2A1852] focus:border-[#7C3AED]/40 focus:outline-none transition-all" style={{ background: "#0F0A1E" }} />
-            <button onClick={sendMsg} disabled={chatLoading || !input.trim()} className="w-8 h-8 rounded-md bg-[#5B21B6] disabled:opacity-40 flex items-center justify-center transition-all">
-              <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-            </button>
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {["Give me the rebooking script","What's my biggest opportunity?","Set me a target for today"].map(p => (
-              <button key={p} onClick={() => setInput(p)} className="text-[9px] text-slate-600 hover:text-slate-300 border border-[#2A1852] hover:border-[#3A2268] px-2 py-1 rounded transition-all">{p}</button>
-            ))}
-          </div>
-        </div>
-        {/* ── RydraCoach Diary ── */}
-        {barber && (
-          <div className="mt-5">
-            <DiaryWidget
-              venueId={VENUE_ID}
-              barberSlug={slug}
-              barberName={barber.name}
-              mode="barber"
-            />
-          </div>
-        )}
- 
-      </div>
-    </div>
-  );
+const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const $ = (n: number) => `$${Math.round(n).toLocaleString("en-AU")}`;
+const pct = (n: number | null | undefined, d = 1) => (n === null || n === undefined ? "–" : `${(n * 100).toFixed(d)}%`);
+const num = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+const STATUS: Record<string, { label: string; color: string }> = {
+  due: { label: "Due now", color: "#EAB308" }, slipping: { label: "Slipping", color: "#FB923C" }, overdue: { label: "Overdue", color: RED }, lapsed: { label: "Lapsed", color: "#9F1239" },
+  new: { label: "One visit", color: PUR_LL }, ontrack: { label: "On track", color: GREEN }, booked: { label: "Booked", color: SKY },
+};
+const dshort = (d: string | null) => (d ? new Date(d + "T12:00:00Z").toLocaleDateString("en-AU", { day: "numeric", month: "short", timeZone: "UTC" }) : "–");
+const hourLabel = (h: string) => { const n = Number(String(h).slice(0, 2)); return n === 12 ? "12pm" : n > 12 ? `${n - 12}pm` : `${n}am`; };
+
+function Box({ title, sub, children, className = "", right }: { title?: string; sub?: string; children: React.ReactNode; className?: string; right?: React.ReactNode }) {
+  return <div className={`rounded-xl p-5 border ${className}`} style={{ background: CARD, borderColor: BDR }}>{(title || right) && <div className="flex items-start justify-between gap-3 mb-3"><div>{title && <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: MUTED }}>{title}</div>}{sub && <div className="text-[11px] text-slate-500 mt-0.5">{sub}</div>}</div>{right}</div>}{children}</div>;
 }
- 
-export default function BarberDashboardPage() {
-  const params = useParams();
-  const router = useRouter();
-  const slug = params?.id as string;
-  const [barber, setBarber] = useState<any>(null);
-  const [stats, setStats] = useState<any>(null);
-  const [shopAvg, setShopAvg] = useState<any>(null);
-  const [opportunities, setOpportunities] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
- 
-  useEffect(() => {
-    if (!slug) return;
-    fetch(`/api/barber/${slug}?venue_id=${VENUE_ID}`)
-      .then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`); return d; })
-      .then(d => { setBarber(d.barber); setStats(d.stats); setShopAvg(d.shop_avg); setOpportunities(d.opportunities || []); })
-      .catch(e => setError(e.message)).finally(() => setLoading(false));
+function Meter({ label, value, sub, color, mark }: { label: string; value: number | null; sub?: string; color: string; mark?: number | null }) {
+  return <div><div className="flex justify-between text-xs mb-1"><span className="text-slate-300">{label}</span><span className="font-bold">{value === null ? "–" : pct(value, 0)}</span></div>
+    <div className="h-2 rounded-full relative" style={{ background: CARD2 }}>{value !== null && <div className="h-full rounded-full" style={{ width: `${Math.min(100, value * 100)}%`, background: color }} />}{mark != null && <div className="absolute top-[-3px] w-0.5 h-3.5" style={{ left: `${Math.min(100, mark * 100)}%`, background: GOLD }} title="team average" />}</div>
+    {sub && <div className="text-[10px] mt-0.5" style={{ color: MUTED }}>{sub}</div>}</div>;
+}
+
+function BarberPage() {
+  const { id: slug } = useParams() as { id: string };
+  const router = useRouter(); const sp = useSearchParams();
+  const VENUE_ID = process.env.NEXT_PUBLIC_ALKAMI_VENUE_ID || "e1a6c15d-8ccc-4f58-aefb-8bea46e39918";
+  const [d, setD] = useState<any>(null); const [err, setErr] = useState(""); const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<"performance" | "wallet" | "manager">(() => (["wallet", "manager"].includes(String(sp.get("tab"))) ? (sp.get("tab") as any) : "performance"));
+  const [filter, setFilter] = useState("risk"); const [sel, setSel] = useState<Set<string>>(new Set());
+  const [bulk, setBulk] = useState<any[] | null>(null); const [showDiary, setShowDiary] = useState(false);
+  const [dRebook, setDRebook] = useState(3); const [dTicket, setDTicket] = useState(4);
+
+  const load = useCallback(async (refresh = false) => {
+    try { const r = await aiFetch(`/api/team/${slug}${refresh ? "?refresh=1" : ""}`); const j = await r.json(); if (!r.ok) throw new Error(j.error || "Could not load this barber"); setD(j); setErr(""); }
+    catch (e: any) { setErr(e?.message || "Could not load this barber"); } finally { setLoading(false); }
   }, [slug]);
- 
-  if (loading) return <div className={`min-h-screen ${BG} flex items-center justify-center`}><div className="text-center"><div className="w-10 h-10 border border-[#7C3AED]/20 border-t-indigo-500 rounded-full animate-spin mx-auto mb-3" /><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Loading {slug?.replace(/-/g," ")}</div></div></div>;
-  if (error || !barber) return <div className={`min-h-screen ${BG} flex items-center justify-center`}><div className="text-center"><div className="text-[9px] font-bold uppercase tracking-widest text-rose-400 mb-2">Barber not found</div><p className="text-xs text-slate-600 mb-1">Slug: {slug}</p><p className="text-xs text-rose-400 mb-4">{error}</p><a href="/merchant/barber" className="text-xs text-[#A78BFA] hover:text-[#C4B5FD]">← Back to team</a></div></div>;
- 
-  const firstName = barber.name.split(" ")[0];
-  const shopRebook = shopAvg?.rebook_rate || 0.179;
-  const shopService = shopAvg?.avg_service_value || 70;
-  const initials = barber.name.split(" ").map((n: string) => n[0]).slice(0,2).join("").toUpperCase();
- 
+  useEffect(() => { load(); const t = setInterval(() => { if (!document.hidden) load(); }, 120_000); return () => clearInterval(t); }, [load]);
+  const goTab = (t: typeof tab) => { setTab(t); const u = new URL(window.location.href); if (t === "performance") u.searchParams.delete("tab"); else u.searchParams.set("tab", t); window.history.replaceState(null, "", u.toString()); };
+
+  const b = d?.barber, s = b?.stats, mt = b?.metrics, shop = d?.shop;
+  const peers: any[] = d?.peers ?? [];
+  const first = b?.name?.split(" ")[0] ?? "";
+  const isOwner = /owner/i.test(b?.role ?? "");
+  const book: any[] = mt?.book ?? [];
+  const shown = useMemo(() => book.filter((c) => (filter === "all" ? true : filter === "risk" ? c.status === "slipping" || c.status === "overdue" : c.status === filter)), [book, filter]);
+  const hours = useMemo(() => (Array.isArray(s?.hourly_breakdown) ? s.hourly_breakdown : []).map((h: any) => ({ h: hourLabel(h.hour), sales: num(h.gross_sales), qty: num(h.sales_qty) })), [s]);
+  const rankOf = (key: string, higher = true) => { const vals = peers.filter((p) => p.stats).map((p) => num(p.stats[key])); const mine = num(s?.[key]); return [...vals].sort((a, c) => (higher ? c - a : a - c)).indexOf(mine) + 1; };
+  const avgOf = (key: string) => { const v = peers.filter((p) => p.stats).map((p) => num(p.stats[key])); return v.length ? v.reduce((a, c) => a + c, 0) / v.length : null; };
+  const reachable = book.filter((c) => sel.has(c.user_id) && c.smsOk && !c.booked);
+  const toBulk = (c: any) => ({ user_id: c.user_id, name: c.name, phone: "on file", markov_state: c.state, risk_segment: c.status, gap_ratio: c.gap_ratio, days_overdue: c.daysSince, intervention_value: Math.max(c.atStake * 0.15, 1), sms_blocked: !c.smsOk });
+
+  if (loading) return <div className="min-h-screen flex items-center justify-center text-sm" style={{ background: "#0A0612", color: MUTED }}>Loading...</div>;
+  if (err || !b) return <div className="min-h-screen flex flex-col items-center justify-center gap-3 text-sm" style={{ background: "#0A0612" }}><div style={{ color: RED }}>{err || "Barber not found"}</div><a href="/merchant/barber" className="underline" style={{ color: PUR_LL }}>Back to the team</a></div>;
+
+  const gapPts = Math.max(0, (num(shop?.rebook_rate) - num(s?.rebook_rate)) * 100);
+  const maxOf = (k: string, floor: number) => Math.max(...peers.map((p) => num(p.stats?.[k])), floor);
+  const radar = s && shop ? [
+    { k: "Rebooking", me: num(s.rebook_rate) / maxOf("rebook_rate", 0.01), shop: num(shop.rebook_rate) / maxOf("rebook_rate", 0.01) },
+    { k: "Ticket size", me: num(s.avg_appt_value) / maxOf("avg_appt_value", 1), shop: num(shop.avg_appt_value) / maxOf("avg_appt_value", 1) },
+    { k: "Upselling", me: num(s.upsell_rate) / maxOf("upsell_rate", 0.001), shop: num(shop.upsell_rate) / maxOf("upsell_rate", 0.001) },
+    { k: "Loyalty", me: num(s.pct_returning_clients) / maxOf("pct_returning_clients", 0.01), shop: num(avgOf("pct_returning_clients")) / maxOf("pct_returning_clients", 0.01) },
+    { k: "Requested", me: num(s.pct_requested_by_client) / maxOf("pct_requested_by_client", 0.01), shop: num(avgOf("pct_requested_by_client")) / maxOf("pct_requested_by_client", 0.01) },
+    { k: "Occupancy", me: num(s.occupancy_rate) / maxOf("occupancy_rate", 0.01), shop: num(avgOf("occupancy_rate")) / maxOf("occupancy_rate", 0.01) },
+  ].map((r) => ({ ...r, me: Math.round(r.me * 100), shop: Math.round(r.shop * 100) })) : [];
+  const gainRebook = dRebook * num(d.pointValue), gainTicket = num(d.yearVisits) * dTicket;
+  const dowMax = Math.max(1, ...(mt?.dow ?? [1]));
+  const opp: { t: string; v: number; note: string; c: string }[] = [];
+  if (gapPts >= 0.5) opp.push({ t: "Close the rebooking gap", v: gapPts * num(d.pointValue), note: `${(num(s.rebook_rate) * 100).toFixed(1)}% vs ${(num(shop.rebook_rate) * 100).toFixed(1)}% shop average`, c: RED });
+  if (mt?.atRiskValue > 0) opp.push({ t: `Win back ${mt.atRiskCount} slipping regulars`, v: mt.atRiskValue, note: "lifetime value that is drifting away", c: GOLD });
+  if (mt?.secondVisit > 0) opp.push({ t: `Secure ${mt.secondVisit} second visits`, v: mt.secondVisit * (num(s?.avg_appt_value) || 50) * 3, note: "one-visit clients still in the window (3 more visits each, estimate)", c: PUR_LL });
+  if (s && num(s.avg_service_value) < num(shop?.avg_service_value) * 0.95) opp.push({ t: "Lift ticket size", v: (num(shop.avg_service_value) - num(s.avg_service_value)) * num(d.yearVisits), note: `$${num(s.avg_service_value).toFixed(0)} vs $${num(shop.avg_service_value).toFixed(0)} shop average per service`, c: GREEN });
+  if (hours.length) { const lo = [...hours].sort((a, c) => a.sales - c.sales)[0], hi = [...hours].sort((a, c) => c.sales - a.sales)[0]; if (hi.sales > lo.sales * 1.6) opp.push({ t: `Fill the ${lo.h} slot`, v: (hi.sales - lo.sales) * 0.25, note: `${lo.h} earns ${$(lo.sales)} vs ${$(hi.sales)} at ${hi.h}. A quarter of that gap, if filled.`, c: SKY }); }
+  opp.sort((x, y) => y.v - x.v);
+  const period = s?.period_label ? `the Fresha stats period (${s.period_label})` : "the Fresha stats period";
+  const hiHour = hours.length ? [...hours].sort((a, c) => c.sales - a.sales)[0] : null; const loHour = hours.length ? [...hours].sort((a, c) => a.sales - c.sales)[0] : null;
+  const newPct = num(s?.pct_new_clients), retPct = num(s?.pct_returning_clients);
+
   return (
-    <div className={`min-h-screen ${BG} text-white pb-16`}>
-      <div className="border-b border-[#0F1829] backdrop-blur-xl sticky top-0 z-30" style={{ background: "rgba(10,6,18,0.97)" }}>
+    <div className="min-h-screen text-white pb-28" style={{ background: "#0A0612" }}>
+      <div className="sticky top-0 z-30 border-b" style={{ background: "rgba(10,6,18,0.97)", borderColor: "#0F1829", backdropFilter: "blur(12px)" }}>
         <div className="max-w-[1400px] mx-auto px-8 h-14 flex items-center gap-6">
-          <div className="flex items-center gap-3 flex-shrink-0">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg, #5B21B6 0%, #D4A017 100%)" }}><svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg></div>
-            <div><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Rydra</div><div className="text-sm font-semibold text-white leading-none">{firstName}'s Dashboard</div></div>
-          </div>
-          <nav className="flex items-center gap-1">
-            {NAV.map(tab => <a key={tab.href} href={tab.href} className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all ${(tab as any).active ? "bg-[#5B21B6] text-white" : "text-slate-400 hover:text-white hover:bg-white/[0.05]"}`}>{tab.label}</a>)}
-          </nav>
-          <a href="/merchant/barber" className="ml-auto text-[10px] text-slate-600 hover:text-slate-300 flex items-center gap-1 flex-shrink-0 transition-colors"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>All barbers</a>
+          <div className="flex items-center gap-3"><div className="w-7 h-7 rounded-lg" style={{ background: `linear-gradient(135deg, ${PUR}, ${GOLD})` }} /><div><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Rydra</div><div className="text-sm font-semibold leading-none">{b.name}</div></div></div>
+          <nav className="flex items-center gap-1">{NAV.map((t) => <a key={t.href} href={t.href} className={`px-3.5 py-1.5 rounded-md text-xs font-medium ${(t as any).active ? "bg-[#5B21B6] text-white" : "text-slate-400 hover:text-white hover:bg-white/5"}`}>{t.label}</a>)}</nav>
+          <a href="/merchant/barber" className="ml-auto text-[11px] hover:text-white" style={{ color: MUTED }}>&larr; Team</a>
         </div>
       </div>
- 
-      <div className="max-w-[1400px] mx-auto px-8 py-8">
-        {/* Profile strip */}
-        <div className={`${CARD} border ${BDR} rounded-xl p-5 mb-6 flex items-center gap-5`}>
-          <div className="w-14 h-14 rounded-xl flex items-center justify-center text-white font-bold text-lg flex-shrink-0" style={{ background: `linear-gradient(135deg, ${barber.color_from}, ${barber.color_to})` }}>{initials}</div>
-          <div className="flex-1">
-            <h1 className="text-xl font-bold text-white tracking-tight">{barber.name}</h1>
-            <div className="text-[10px] text-slate-600 capitalize">{barber.role} · Alkami Barbershop, Canberra</div>
-            {stats && (
-              <div className="flex items-center gap-1 mt-1">
-                {[1,2,3,4,5].map(i => <div key={i} className="w-2 h-2 rounded-sm" style={{ background: i <= Math.round(stats.avg_rating) ? "#FBBF24" : "#2A1852" }} />)}
-                <span className="text-[9px] text-slate-600 ml-1">{stats.avg_rating?.toFixed(2)} · {stats.review_count} reviews</span>
-              </div>
-            )}
+
+      <div className="max-w-[1400px] mx-auto px-8 pt-8 space-y-6">
+        <div className="rounded-xl p-6 border flex flex-wrap items-center gap-6" style={{ background: CARD, borderColor: BDR }}>
+          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-xl font-bold" style={{ background: `linear-gradient(135deg, ${b.color_from}, ${b.color_to})` }}>{b.name.split(" ").map((n: string) => n[0]).slice(0, 2).join("")}</div>
+          <div className="flex-1 min-w-[240px]">
+            <div className="flex items-center gap-2"><h1 className="text-2xl font-bold tracking-tight">{b.name}</h1>{isOwner && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ color: GOLD, background: `${GOLD}22` }}>OWNER</span>}</div>
+            <div className="text-sm" style={{ color: MUTED }}><span className="capitalize">{b.role}</span>{s ? ` · ${num(s.avg_rating).toFixed(2)} stars from ${num(s.review_count)} reviews` : ""}{s?.period_label ? ` · stats for ${s.period_label}` : ""}</div>
+            {s && <div className="flex flex-wrap gap-2 mt-3">{[["Revenue", rankOf("total_revenue")], ["Rebooking", rankOf("rebook_rate")], ["Ticket", rankOf("avg_appt_value")], ["Upselling", rankOf("upsell_rate")], ["Requested", rankOf("pct_requested_by_client")]].map(([l, r]) => <span key={l as string} className="text-[11px] px-2.5 py-1 rounded-full" style={{ background: r === 1 ? `${GOLD}22` : CARD2, color: r === 1 ? GOLD : "#94A3B8" }}>{r === 1 ? "★ " : ""}#{r as number} {l} <span style={{ color: MUTED }}>of {peers.length}</span></span>)}</div>}
           </div>
-          <button onClick={() => router.push(`/merchant/barber/${slug}/coach`)}
-            className="flex items-center gap-2.5 px-5 py-2.5 rounded-lg text-sm font-semibold text-white transition-all flex-shrink-0"
-            style={{ background: "#5B21B6", boxShadow: "0 4px 20px rgba(91,33,182,0.3)" }}>
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" /></svg>
-            Open RydraCoach
-          </button>
+          <a href={`/merchant/barber/${slug}/coach`} className="px-5 py-3 rounded-lg text-sm font-bold" style={{ background: `linear-gradient(135deg, ${PUR}, ${GOLD})` }}>Open RydraCoach</a>
         </div>
- 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
-          <MiniCoach barber={barber} stats={stats} shopAvg={shopAvg} slug={slug} />
-          <div className="space-y-4">
-            {stats ? (
-              <>
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { l: "Total Revenue",    v: `$${(stats.total_revenue/1000).toFixed(0)}k`, sub: `$${stats.avg_appt_value?.toFixed(0)||0}/appt`, acc: "#D4A017" },
-                    { l: "Rebook Rate",      v: `${(stats.rebook_rate*100).toFixed(1)}%`,   sub: `${stats.rebook_rate >= shopRebook ? "+" : ""}${((stats.rebook_rate-shopRebook)*100).toFixed(1)}% vs avg`, acc: stats.rebook_rate >= shopRebook ? "#34D399" : "#F43F5E" },
-                    { l: "Avg Service",      v: `$${stats.avg_service_value?.toFixed(0)||0}`, sub: `vs $${shopService.toFixed(0)} avg`, acc: stats.avg_service_value >= shopService ? "#34D399" : "#FBBF24" },
-                    { l: "Total Appts",      v: stats.total_appts?.toLocaleString() || "0",  sub: stats.period_label || "Period", acc: "#7C3AED" },
-                  ].map(({ l, v, sub, acc }) => (
-                    <div key={l} className={`${CARD} border ${BDR} rounded-xl p-4 relative overflow-hidden`}>
-                      <div className="absolute left-0 top-3 bottom-3 w-[2px] rounded-r-full" style={{ background: acc }} />
-                      <div className="pl-3">
-                        <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-1.5">{l}</div>
-                        <div className="text-xl font-bold text-white tracking-tight">{v}</div>
-                        <div className="text-[9px] text-slate-600 mt-0.5">{sub}</div>
+
+        <div className="flex gap-1 border-b" style={{ borderColor: BDR }}>
+          {([["performance", "Performance"], ["wallet", "Wallet"], ...(isOwner ? [["manager", "Manager console"]] : [])] as [typeof tab, string][]).map(([k, l]) => <button key={k} onClick={() => goTab(k)} className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wider -mb-px border-b-2" style={{ borderColor: tab === k ? (k === "manager" ? GOLD : PUR_L) : "transparent", color: tab === k ? (k === "manager" ? GOLD : PUR_LL) : MUTED }}>{l}</button>)}
+        </div>
+
+        {tab === "wallet" && <BarberWallet barberId={b.id} barberName={b.name} />}
+        {tab === "manager" && isOwner && <OwnerConsole teamStats={{ visits: num(d.visitCount), links: num(d.linkCount), level: d.dataLevel }} onChanged={() => load(true)} />}
+
+        {tab === "performance" && (<>
+          {s && (
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+              {[
+                ["Revenue", $(num(s.total_revenue)), mt?.hasVisits ? `${$(mt.revenue12m)} last 12 months` : `services ${$(num(s.services_revenue))}`, null],
+                ["Rebook rate", pct(num(s.rebook_rate)), `shop ${pct(num(shop?.rebook_rate))}`, num(s.rebook_rate) - num(shop?.rebook_rate)],
+                ["Avg appointment", $(num(s.avg_appt_value)), `shop ${$(num(shop?.avg_appt_value))}`, num(s.avg_appt_value) - num(shop?.avg_appt_value)],
+                ["Upsell rate", pct(num(s.upsell_rate)), `shop ${pct(num(shop?.upsell_rate))}`, num(s.upsell_rate) - num(shop?.upsell_rate)],
+                ["Occupancy", pct(num(s.occupancy_rate), 0), `team ${pct(avgOf("occupancy_rate"), 0)}`, num(s.occupancy_rate) - num(avgOf("occupancy_rate"))],
+                ["Appointments", num(s.total_appts).toLocaleString(), mt?.weeklyVisits ? `${mt.weeklyVisits}/wk lately` : `${num(s.total_clients)} clients`, null],
+              ].map(([l, v, sub, delta]) => <div key={l as string} className="rounded-xl p-4 border" style={{ background: CARD, borderColor: BDR }}><div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: MUTED }}>{l}</div><div className="text-2xl font-bold mt-1.5">{v}</div><div className="text-[11px] mt-0.5 flex items-center gap-1.5" style={{ color: "#64748B" }}>{delta !== null && <span style={{ color: (delta as number) >= 0 ? GREEN : RED }}>{(delta as number) >= 0 ? "▲" : "▼"}</span>}{sub}</div></div>)}
+            </div>
+          )}
+
+          {opp.length > 0 && (
+            <Box title="Where the money is" sub={`Biggest opportunities first. Estimates, measured over ${period}.`}>
+              <div className={`grid grid-cols-1 gap-3 ${opp.length >= 4 ? "md:grid-cols-2 xl:grid-cols-4" : opp.length === 3 ? "md:grid-cols-3" : opp.length === 2 ? "md:grid-cols-2" : ""}`}>{opp.slice(0, 4).map((o) => <div key={o.t} className="rounded-lg p-4" style={{ background: CARD2, borderLeft: `3px solid ${o.c}` }}><div className="text-xl font-bold" style={{ color: o.c }}>{$(o.v)}</div><div className="text-sm font-semibold mt-1">{o.t}</div><div className="text-[11px] mt-1" style={{ color: MUTED }}>{o.note}</div></div>)}</div>
+            </Box>
+          )}
+
+          <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_1fr] gap-6">
+            <div className="space-y-6">
+              {hours.length > 0 && (
+                <Box title="When the money comes in" sub={hiHour && loHour ? `Busiest: ${hiHour.h} (${$(hiHour.sales)}). Quietest: ${loHour.h} (${$(loHour.sales)}). Sales by hour over ${period}.` : undefined}
+                  right={loHour ? <a href={`/merchant/campaign`} className="text-[11px] font-semibold px-3 py-1.5 rounded-md whitespace-nowrap" style={{ background: `${SKY}22`, color: SKY }}>Fill quiet hours</a> : null}>
+                  <div style={{ height: 200 }}><ResponsiveContainer width="100%" height="100%"><BarChart data={hours} margin={{ left: -10, right: 8, top: 8 }}>
+                    <XAxis dataKey="h" tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${Math.round(v / 1000)}k`} />
+                    <Tooltip contentStyle={TIP} cursor={{ fill: "#ffffff08" }} formatter={(v: any, n: any, p: any) => [`${$(Number(v))} from ${p.payload.qty} sales`, "Sales"]} />
+                    <Bar dataKey="sales" radius={[4, 4, 0, 0]}>{hours.map((h: any, i: number) => <Cell key={i} fill={hiHour && h.h === hiHour.h ? GOLD : loHour && h.h === loHour.h ? SKY : b.color_from} fillOpacity={0.9} />)}</Bar></BarChart></ResponsiveContainer></div>
+                </Box>
+              )}
+
+              {s && (
+                <Box title="Who sits in the chair" sub={`From Fresha, ${s.period_label ?? "latest period"}`}>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <div className="flex justify-between text-xs mb-1.5"><span className="text-slate-300">New vs returning clients</span><span style={{ color: MUTED }}>{num(s.total_clients)} clients</span></div>
+                      <div className="h-6 rounded-lg overflow-hidden flex text-[10px] font-bold">
+                        <div className="flex items-center justify-center" style={{ width: `${newPct * 100}%`, background: PUR_L }}>{newPct > 0.12 ? `${Math.round(newPct * 100)}% new` : ""}</div>
+                        <div className="flex items-center justify-center" style={{ width: `${retPct * 100}%`, background: GREEN, color: "#052e1c" }}>{retPct > 0.12 ? `${Math.round(retPct * 100)}% returning` : ""}</div>
                       </div>
+                      <div className="text-[11px] mt-2" style={{ color: "#94A3B8" }}>{newPct > 0.6 ? `${first} sees a lot of new faces. Every first-timer rebooked in the chair is a future regular.` : `A solid base of returning clients.`} {num(s.rebooked_clients)} clients rebooked.</div>
                     </div>
-                  ))}
-                </div>
-                {opportunities.length > 0 && (
-                  <div className="space-y-2">
-                    {opportunities.map((opp, idx) => (
-                      <div key={idx} className="rounded-lg px-4 py-3 flex items-center justify-between border" style={{ background: opp.severity === "critical" ? "rgba(244,63,94,0.06)" : opp.severity === "warning" ? "rgba(251,191,36,0.06)" : "rgba(56,189,248,0.06)", borderColor: opp.severity === "critical" ? "rgba(244,63,94,0.2)" : opp.severity === "warning" ? "rgba(251,191,36,0.2)" : "rgba(56,189,248,0.2)" }}>
-                        <div>
-                          <span className="text-xs font-semibold text-white">{opp.label}</span>
-                          <span className="text-[10px] text-slate-500 ml-2">{opp.detail}</span>
-                        </div>
-                        {opp.potential_extra_revenue > 0 && <span className="text-xs font-bold text-emerald-400">+${opp.potential_extra_revenue.toLocaleString()}</span>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className={`${CARD} border ${BDR} rounded-xl p-8 text-center`}>
-                <div className="text-[9px] text-slate-700 uppercase tracking-widest">No stats — run barbers_reseed.sql in Supabase</div>
-              </div>
-            )}
-          </div>
-        </div>
- 
-        {stats && (
-          <div className="grid grid-cols-3 gap-5 mb-5">
-            <div className={`${CARD} border ${BDR} rounded-xl p-5`}>
-              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-4">Peak Hours</div>
-              <ResponsiveContainer width="100%" height={160}>
-                <BarChart data={stats.hourly_breakdown || []} margin={{ left: -20 }}>
-                  <XAxis dataKey="hour" stroke="#3A2268" fontSize={9} tick={{ fill: "#475569" }} tickFormatter={(h: string) => h.replace(":00","")} />
-                  <YAxis stroke="#3A2268" fontSize={9} tick={{ fill: "#475569" }} />
-                  <Tooltip contentStyle={TIP} formatter={(v: any) => [`${v} appts`, ""]} />
-                  <Bar dataKey="sales_qty" fill="#7C3AED" radius={[3,3,0,0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
- 
-            <div className={`${CARD} border ${BDR} rounded-xl p-5`}>
-              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-4">vs Shop Average</div>
-              <div className="space-y-3.5">
-                {[
-                  { l: "Rebook Rate", bv: stats.rebook_rate*100, sv: shopRebook*100, fmt: (v: number) => `${v.toFixed(1)}%` },
-                  { l: "Avg Service",  bv: stats.avg_service_value, sv: shopService, fmt: (v: number) => `$${v.toFixed(0)}` },
-                  { l: "Upsell Rate", bv: stats.upsell_rate*100, sv: 3.8, fmt: (v: number) => `${v.toFixed(1)}%` },
-                  { l: "Returning %", bv: stats.pct_returning_clients*100, sv: 21, fmt: (v: number) => `${v.toFixed(1)}%` },
-                ].map(({ l, bv, sv, fmt }) => {
-                  const good = bv >= sv; const max = Math.max(bv, sv) * 1.2;
-                  return (
-                    <div key={l}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[9px] text-slate-600">{l}</span>
-                        <div className="flex items-center gap-2 text-[9px]">
-                          <span className={`font-bold ${good ? "text-emerald-400" : "text-rose-400"}`}>{fmt(bv)}</span>
-                          <span className="text-slate-700">avg {fmt(sv)}</span>
-                        </div>
-                      </div>
-                      <div className="h-1 rounded-full" style={{ background: "#2A1852" }}>
-                        <div className="h-full rounded-full" style={{ width: `${(bv/max)*100}%`, background: good ? "#34D399" : "#F43F5E" }} />
-                      </div>
+                    <div className="space-y-3">
+                      <Meter label="Asked for by name" value={num(s.pct_requested_by_client)} color={GOLD} mark={avgOf("pct_requested_by_client")} sub="gold mark = team average" />
+                      <Meter label="Booked online" value={num(s.pct_online)} color={SKY} mark={avgOf("pct_online")} />
+                      <Meter label="Chair occupancy" value={num(s.occupancy_rate)} color={PUR_L} mark={avgOf("occupancy_rate")} />
                     </div>
-                  );
-                })}
-              </div>
-            </div>
- 
-            <div className={`${CARD} border ${BDR} rounded-xl p-5`}>
-              <div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-4">Client Breakdown</div>
-              <div className="space-y-2">
-                {[
-                  { l: "Total clients",    v: stats.total_clients },
-                  { l: "New",             v: `${stats.new_clients} (${(stats.pct_new_clients*100).toFixed(0)}%)`, col: "#38BDF8" },
-                  { l: "Returning",        v: `${stats.returning_clients} (${(stats.pct_returning_clients*100).toFixed(0)}%)`, col: "#34D399" },
-                  { l: "Rebooked",         v: `${stats.rebooked_clients} (${(stats.rebook_rate*100).toFixed(1)}%)`, col: stats.rebook_rate < 0.15 ? "#F43F5E" : "#34D399" },
-                  { l: "Upsell items",     v: stats.total_upsell_items },
-                  { l: "Upsell rate",      v: `${(stats.upsell_rate*100).toFixed(1)}%`, col: stats.upsell_rate < 0.02 ? "#F43F5E" : "#FBBF24" },
-                ].map(({ l, v, col }) => (
-                  <div key={l} className="flex items-center justify-between py-1 border-b border-[#0F1529]">
-                    <span className="text-[9px] text-slate-600">{l}</span>
-                    <span className="text-[10px] font-semibold" style={{ color: col || "#fff" }}>{v}</span>
                   </div>
-                ))}
-              </div>
+                </Box>
+              )}
+
+              {mt?.hasVisits && (
+                <Box title="Revenue, last 12 months" sub="From imported visit history">
+                  <div style={{ height: 190 }}><ResponsiveContainer width="100%" height="100%"><AreaChart data={mt.months.map((x: any) => ({ ...x, label: new Date(x.m + "-15").toLocaleDateString("en-AU", { month: "short" }) }))} margin={{ left: -10, right: 8, top: 8 }}>
+                    <defs><linearGradient id="rv" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={b.color_from} stopOpacity={0.5} /><stop offset="100%" stopColor={b.color_from} stopOpacity={0} /></linearGradient></defs>
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v / 1000}k`} />
+                    <Tooltip contentStyle={TIP} formatter={(v: any) => [$(Number(v)), "Revenue"]} /><Area dataKey="revenue" stroke={b.color_from} strokeWidth={2} fill="url(#rv)" /></AreaChart></ResponsiveContainer></div>
+                </Box>
+              )}
+
+              {mt && book.length > 0 ? (
+                <Box title={`${first}'s book of clients`} sub={`${book.length} clients see ${first} most. ${$(mt.bookValue)} lifetime value.`}>
+                  <div className="flex flex-wrap gap-1.5 mb-3">{[["risk", `Running late (${book.filter((c) => c.status === "slipping" || c.status === "overdue").length})`], ["due", `Due now (${book.filter((c) => c.status === "due").length})`], ["new", `One visit (${book.filter((c) => c.status === "new").length})`], ["lapsed", `Lapsed (${book.filter((c) => c.status === "lapsed").length})`], ["booked", `Booked (${book.filter((c) => c.status === "booked").length})`], ["all", "Everyone"]].map(([k, l]) => <button key={k} onClick={() => setFilter(k)} className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: filter === k ? PUR_L : CARD2, color: filter === k ? "#fff" : "#94A3B8" }}>{l}</button>)}
+                    <button onClick={() => setSel(new Set(shown.filter((c) => c.smsOk && !c.booked).slice(0, 25).map((c) => c.user_id)))} className="ml-auto px-3 py-1.5 rounded-lg text-xs border" style={{ borderColor: BDR, color: PUR_LL }}>Select up to 25 who can be texted</button></div>
+                  <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr style={{ borderBottom: `1px solid ${BDR}` }}>{["", "Client", "Status", "Last visit", `Visits (with ${first})`, "Lifetime", "At stake"].map((h, i) => <th key={i} className="px-2 py-2 text-left text-[10px] font-bold uppercase tracking-widest whitespace-nowrap" style={{ color: MUTED }}>{h}</th>)}</tr></thead>
+                    <tbody>{shown.slice(0, 40).map((c) => { const st = STATUS[c.status]; const on = sel.has(c.user_id); return (
+                      <tr key={c.user_id} className="border-b hover:bg-white/[0.03] cursor-pointer" style={{ borderColor: "#1d1238", background: on ? `${PUR_L}12` : undefined }} onClick={() => router.push(`/merchant/clients/${c.user_id}`)}>
+                        <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}><input type="checkbox" disabled={!c.smsOk || c.booked} checked={on} onChange={() => setSel((x) => { const n = new Set(x); on ? n.delete(c.user_id) : n.add(c.user_id); return n; })} style={{ accentColor: PUR_L }} /></td>
+                        <td className="px-2 py-2 font-medium">{c.name}</td>
+                        <td className="px-2 py-2"><span className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ color: st.color, background: `${st.color}1f` }}>{st.label}</span></td>
+                        <td className="px-2 py-2 text-slate-300">{c.booked ? "booked" : dshort(c.lastVisit)}<div className="text-[10px]" style={{ color: MUTED }}>{c.booked ? "" : `${c.daysSince}d ago`}</div></td>
+                        <td className="px-2 py-2 text-slate-300">{c.visitsWithMe || "–"} <span style={{ color: MUTED }}>of {c.visits}</span></td><td className="px-2 py-2 text-slate-300">{$(c.clv)}</td>
+                        <td className="px-2 py-2 font-semibold" style={{ color: c.atStake > 100 ? GOLD : "#94A3B8" }}>{c.atStake ? $(c.atStake) : "–"}</td></tr>); })}
+                      {!shown.length && <tr><td colSpan={7} className="py-8 text-center text-sm" style={{ color: MUTED }}>Nobody in this group.</td></tr>}</tbody></table></div>
+                </Box>
+              ) : (
+                <Box title={`${first}'s book of clients`}>
+                  <div className="text-sm text-slate-300 leading-relaxed">Rydra doesn't know yet which clients see {first}. Fresha's customer list doesn't say which barber did each cut, so it needs the appointment history.</div>
+                  <div className="text-[12px] mt-2" style={{ color: MUTED }}>Once it's imported, this shows {first}'s regulars, who's running late, one-visit clients to save, and lets {first} text them, plus the coach can name real clients.</div>
+                  {isOwner ? <button onClick={() => goTab("manager")} className="mt-4 px-4 py-2 rounded-lg text-xs font-bold" style={{ background: GOLD, color: "#000" }}>Import client history</button>
+                    : <a href={`/merchant/barber/${peers.find((p) => /owner/i.test(p.role ?? ""))?.slug ?? "jb-edwards"}?tab=manager`} className="inline-block mt-4 px-4 py-2 rounded-lg text-xs font-bold" style={{ background: GOLD, color: "#000" }}>Import it in the manager console</a>}
+                  <div className="text-[11px] mt-3" style={{ color: MUTED }}>You can also set a client's barber by hand on any client's page.</div>
+                </Box>
+              )}
+            </div>
+
+            <div className="space-y-6">
+              {radar.length > 0 && (
+                <Box title={`${first} vs the shop`} sub="Each spoke is scaled to the best barber on the team">
+                  <div style={{ height: 250 }}><ResponsiveContainer width="100%" height="100%"><RadarChart data={radar} outerRadius="70%"><PolarGrid stroke={BDR} /><PolarAngleAxis dataKey="k" tick={{ fontSize: 11, fill: "#94A3B8" }} />
+                    <Radar name="Shop average" dataKey="shop" stroke={MUTED} fill={MUTED} fillOpacity={0.15} /><Radar name={first} dataKey="me" stroke={b.color_from} fill={b.color_from} fillOpacity={0.35} /><Tooltip contentStyle={TIP} /></RadarChart></ResponsiveContainer></div>
+                  <div className="flex justify-center gap-4 text-[11px]"><span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: b.color_from }} />{first}</span><span className="flex items-center gap-1.5" style={{ color: MUTED }}><span className="w-2 h-2 rounded-full" style={{ background: MUTED }} />Shop average</span></div>
+                </Box>
+              )}
+              <Box title="Leaderboard position" sub="Where each number ranks on the team">
+                <div className="space-y-2.5">{[["Rebook rate", "rebook_rate", pct], ["Avg appointment", "avg_appt_value", (v: number) => $(v)], ["Upsell rate", "upsell_rate", pct], ["Returning clients", "pct_returning_clients", pct], ["Asked for by name", "pct_requested_by_client", pct]].map(([l, k, f]: any) => {
+                  const sorted = peers.filter((p) => p.stats).sort((a, c) => num(c.stats[k]) - num(a.stats[k])); const top = sorted[0]; const r = sorted.findIndex((p) => p.slug === slug) + 1;
+                  return <div key={k} className="flex items-center gap-3 text-xs"><div className="w-32 text-slate-300">{l}</div><div className="flex-1 flex gap-1">{sorted.map((p) => <div key={p.slug} className="flex-1 h-2 rounded-full" style={{ background: p.slug === slug ? b.color_from : CARD2 }} title={`${p.name}: ${f(num(p.stats[k]))}`} />)}</div><div className="w-24 text-right"><b>#{r}</b> <span style={{ color: MUTED }}>{r === 1 ? "top" : `top: ${top?.name.split(" ")[0]}`}</span></div></div>;
+                })}</div>
+              </Box>
+              {mt?.hasVisits && (
+                <Box title="Do clients come back?" sub="Measured from real visit history">
+                  <div className="space-y-3">
+                    <Meter label="Back within 45 days of a visit" value={mt.return45} color={PUR_L} mark={(() => { const v = peers.map((p) => p.return45).filter((x) => x !== null); return v.length > 1 ? v.reduce((a, c) => a + c, 0) / v.length : null; })()} sub={`${mt.return45n} visits measured`} />
+                    <Meter label="First-timers who return within 60 days" value={mt.firstReturn} color={GREEN} mark={(() => { const v = peers.map((p) => p.firstReturn).filter((x) => x !== null); return v.length > 1 ? v.reduce((a, c) => a + c, 0) / v.length : null; })()} sub={`${mt.firstReturnN} first-timers`} />
+                    <Meter label={`Return visits that stay with ${first}`} value={mt.keptWithMe} color={GOLD} />
+                  </div>
+                </Box>
+              )}
+              {mt?.hasVisits && (
+                <Box title="Busiest days" sub="Visits, all imported history">
+                  <div className="flex items-end gap-2 h-24">{mt.dow.map((n: number, i: number) => <div key={i} className="flex-1 flex flex-col items-center justify-end h-full gap-1"><div className="w-full rounded-t" style={{ height: `${(n / dowMax) * 100}%`, minHeight: n ? 4 : 2, background: n === dowMax ? GOLD : n ? PUR_L : CARD2 }} /><div className="text-[9px]" style={{ color: MUTED }}>{DOW[i]}</div></div>)}</div>
+                </Box>
+              )}
+              <Box title="What-if calculator" sub={`What small habit changes are worth for ${first}, over a period like ${period}`}>
+                <label className="block text-xs mb-3"><div className="flex justify-between mb-1"><span style={{ color: MUTED }}>Rebook rate up</span><span className="font-semibold text-white">+{dRebook} points</span></div><input type="range" min={0} max={10} value={dRebook} onChange={(e) => setDRebook(Number(e.target.value))} className="w-full" style={{ accentColor: PUR_L }} /></label>
+                <label className="block text-xs mb-3"><div className="flex justify-between mb-1"><span style={{ color: MUTED }}>Average ticket up</span><span className="font-semibold text-white">+${dTicket}</span></div><input type="range" min={0} max={15} value={dTicket} onChange={(e) => setDTicket(Number(e.target.value))} className="w-full" style={{ accentColor: GOLD }} /></label>
+                <div className="rounded-lg p-3 text-center" style={{ background: CARD2 }}><div className="text-3xl font-bold" style={{ color: GREEN }}>{$(gainRebook + gainTicket)}</div><div className="text-[11px]" style={{ color: MUTED }}>{$(gainRebook)} rebooking + {$(gainTicket)} ticket size</div></div>
+                <div className="text-[10px] mt-2" style={{ color: MUTED }}>Based on {num(d.yearVisits).toLocaleString()} appointments. Each rebooking point = 1% of those appointments x the average appointment value. Estimate, not a promise.</div>
+              </Box>
             </div>
           </div>
-        )}
- 
-        {/* Scripts */}
-        <div className={`${CARD} border ${BDR} rounded-xl p-5`}>
-          <div className="flex items-center justify-between mb-4">
-            <div><div className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-0.5">Quick Reference</div><div className="text-sm font-semibold text-white">Key Scripts</div></div>
-            <button onClick={() => router.push(`/merchant/barber/${slug}/coach`)} className="text-[10px] text-[#A78BFA] hover:text-[#C4B5FD] transition-colors">Open full coach →</button>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <a href={`/merchant/barber/${slug}/coach`} className="text-xs font-semibold px-4 py-2 rounded-lg border" style={{ borderColor: GOLD, color: GOLD }}>Train with RydraCoach</a>
+            <button onClick={() => setShowDiary((v) => !v)} className="text-xs font-semibold px-4 py-2 rounded-lg border" style={{ borderColor: BDR, color: PUR_LL }}>{showDiary ? "Hide" : "Show"} diary & client notes</button>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            {[
-              { tag: "Rebooking", hex: "#F43F5E", msg: `"Before you head off — let's get your next one locked in. Four weeks puts you on [date]. I've got 10am or 2pm — which works?"`, note: "While in the chair. Two options = two yeses." },
-              { tag: "Upsell",    hex: "#FBBF24", msg: `"Your beard's looking a bit dry — I'll add a quick treatment, takes two minutes and makes the cut last way longer."`, note: "Observe → benefit → assume the yes." },
-            ].map(({ tag, hex, msg, note }) => (
-              <div key={tag} className="rounded-lg p-4 border" style={{ background: "#0F0A1E", borderColor: `${hex}20` }}>
-                <div className="text-[9px] font-bold uppercase tracking-widest mb-2" style={{ color: hex }}>{tag}</div>
-                <p className="text-xs text-slate-300 italic leading-relaxed mb-2">{msg}</p>
-                <p className="text-[9px] text-slate-600">{note}</p>
-              </div>
-            ))}
-          </div>
-        </div>
+          {showDiary && <DiaryWidget venueId={VENUE_ID} barberSlug={slug} barberName={b.name} mode="barber" />}
+        </>)}
       </div>
+
+      {sel.size > 0 && tab === "performance" && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 rounded-2xl px-5 py-3 border shadow-2xl" style={{ background: "#1A1030", borderColor: PUR_L }}>
+          <div className="text-sm"><span className="font-bold">{sel.size}</span> selected <span style={{ color: MUTED }}>· {reachable.length} can be texted</span></div>
+          <button disabled={!reachable.length} onClick={() => setBulk(reachable)} className="px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-30" style={{ background: `linear-gradient(135deg, ${PUR}, ${GOLD})` }}>Text them as {first} (AI writes each)</button>
+          <button onClick={() => setSel(new Set())} className="text-xs underline" style={{ color: MUTED }}>Clear</button>
+        </div>
+      )}
+      {bulk && <BulkSendModal customers={bulk.map(toBulk)} label={`${first}'s clients`} hex={PUR_LL} maxChars={d.config?.body_max ?? 100} onClose={() => setBulk(null)} onSent={() => { setSel(new Set()); load(true); }} />}
     </div>
   );
 }
+
+export default function Page() { return <Suspense fallback={null}><BarberPage /></Suspense>; }
